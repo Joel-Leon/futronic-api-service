@@ -21,8 +21,8 @@ namespace futronic_cli
                 {
                     Console.WriteLine("=== Futronic CLI ===");
                     Console.WriteLine("Uso:");
-                    Console.WriteLine("  futronic-cli.exe capture [archivo.ftr] [--samples N]  - Capturar huella con N muestras (defecto 5)");
-                    Console.WriteLine("  futronic-cli.exe verify archivo.ftr [--samples N]     - Verificar capturando con N muestras (defecto 5)");
+                    Console.WriteLine("  futronic-cli.exe capture [archivo.ftr] [--samples N]            - Capturar huella (enrolar) con N muestras (defecto 5)");
+                    Console.WriteLine("  futronic-cli.exe verify archivo.ftr [--farn X]                   - Verificar contra template con FAR solicitado (defecto 1000)");
                     return;
                 }
 
@@ -56,6 +56,67 @@ namespace futronic_cli
             }
         }
 
+        static void TrySetProperty(object obj, string propertyName, object value)
+        {
+            try
+            {
+                var p = obj.GetType().GetProperty(propertyName);
+                if (p != null && p.CanWrite)
+                {
+                    // Si el tipo no coincide exactamente, intenta convertir
+                    var targetType = p.PropertyType;
+                    object finalValue = value;
+
+                    if (value != null && !targetType.IsAssignableFrom(value.GetType()))
+                    {
+                        try
+                        {
+                            finalValue = Convert.ChangeType(value, targetType);
+                        }
+                        catch
+                        {
+                            // si no se puede convertir, no seteamos
+                            Console.WriteLine($"(i) No se pudo convertir valor para {propertyName}. Se omite.");
+                            return;
+                        }
+                    }
+
+                    p.SetValue(obj, finalValue, null);
+                    Console.WriteLine($"(i) Propiedad {propertyName} establecida.");
+                }
+                else
+                {
+                    Console.WriteLine($"(i) Propiedad {propertyName} no encontrada o no editable. Se omite.");
+                }
+            }
+            catch (System.Reflection.TargetInvocationException tie)
+            {
+                Console.WriteLine($"(i) Setter {propertyName} lanzó excepción interna: {tie.InnerException?.Message ?? tie.Message}. Se omite.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"(i) No se pudo establecer {propertyName}: {ex.Message}. Se omite.");
+            }
+        }
+
+        static bool GetBoolArg(string[] args, string name, bool defaultValue)
+        {
+            // --fast  (presencia => true)
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (args[i].StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = args[i].Substring(name.Length + 1).ToLowerInvariant();
+                    if (val == "1" || val == "true" || val == "on" || val == "yes") return true;
+                    if (val == "0" || val == "false" || val == "off" || val == "no") return false;
+                }
+            }
+            return defaultValue;
+        }
+
         static int GetIntArg(string[] args, string name, int defaultValue)
         {
             // Busca "--samples", "--farn", etc.
@@ -76,75 +137,143 @@ namespace futronic_cli
         }
         static void CaptureFingerprint(string customPath = null)
         {
-            var done = new ManualResetEvent(false);
-            byte[] capturedTemplate = null;
-            string errorMessage = null;
-
-            // Lee --samples (si no se pasó, usa 5)
-            // Nota: Environment.GetCommandLineArgs() incluye el exe, por eso Skip(1).
+            // Args
             var args = Environment.GetCommandLineArgs();
             int samples = GetIntArg(args, "--samples", 5);
             if (samples < 1) samples = 1;
 
-            var enrollment = new FutronicEnrollment
-            {
-                FakeDetection = false,
-                MaxModels = samples,          // <<<<<< clave
-                MIOTControlOff = true
-            };
+            int retries = GetIntArg(args, "--retries", 2);      // reintentos si falla por calidad
+            bool fast = GetBoolArg(args, "--fast", false);      // por defecto, robustez > velocidad
+            string fingerLabel = null;                          // p.ej. --finger right-index
+            for (int i = 0; i < args.Length - 1; i++)
+                if (string.Equals(args[i], "--finger", StringComparison.OrdinalIgnoreCase))
+                    fingerLabel = args[i + 1];
 
-            Console.WriteLine($"=== MODO CAPTURA ===");
-            Console.WriteLine($"Usando {samples} muestra(s) para el enrolamiento…");
+            Console.WriteLine("=== MODO CAPTURA (Enrolamiento) ===");
+            Console.WriteLine($"Muestras: {samples} | FastMode: {fast} | Reintentos: {retries}");
+            if (!string.IsNullOrWhiteSpace(fingerLabel))
+                Console.WriteLine($"Etiqueta de dedo: {fingerLabel}");
 
-            enrollment.OnPutOn += (FTR_PROGRESS progress) =>
-            {
-                Console.WriteLine("→ Ponga el dedo...");
-            };
+            byte[] capturedTemplate = null;
+            string errorMessage = null;
 
-            enrollment.OnTakeOff += (FTR_PROGRESS progress) =>
+            // Función local que intenta una captura completa (con N muestras)
+            bool TryCaptureOnce(out byte[] templateOut, out int lastResultCodeOut)
             {
-                Console.WriteLine("→ Retire el dedo...");
-            };
+                var done = new ManualResetEvent(false);
 
-            enrollment.OnFakeSource += (FTR_PROGRESS progress) =>
-            {
-                Console.WriteLine("⚠ Dedo falso detectado");
-                return true;
-            };
+                // Usamos variables locales (NO out) para que la lambda pueda asignar
+                byte[] localTemplate = null;
+                int localResultCode = 0;
 
-            enrollment.OnEnrollmentComplete += (bool success, int result) =>
-            {
-                try
+                var enrollment = new FutronicEnrollment
                 {
-                    if (success)
-                    {
-                        capturedTemplate = enrollment.Template;
-                        Console.WriteLine($"✅ Captura OK. Bytes: {capturedTemplate?.Length ?? 0}");
-                    }
-                    else
-                    {
-                        errorMessage = GetErrorDescription(result);
-                        Console.WriteLine($"❌ Captura falló. {errorMessage}");
-                    }
-                }
-                finally
-                {
-                    done.Set();
-                }
-            };
+                    FakeDetection = false,
+                    MaxModels = samples
+                };
 
-            Console.WriteLine("=== MODO CAPTURA ===");
-            Console.WriteLine("Iniciando captura...");
-            enrollment.Enrollment();
-            done.WaitOne();
+                // Ajustes opcionales si existen en tu SDK
+                TrySetProperty(enrollment, "FastMode", fast);
+                TrySetProperty(enrollment, "FFDControl", true);
+
+                enrollment.OnPutOn += (FTR_PROGRESS p) =>
+                {
+                    Console.WriteLine("→ Ponga el dedo firmemente. (muestra en progreso)");
+                };
+
+                enrollment.OnTakeOff += (FTR_PROGRESS p) =>
+                {
+                    Console.WriteLine("→ Retire el dedo. Reposicione ligeramente (rotar 5–10°, variar presión).");
+                };
+
+                enrollment.OnFakeSource += (FTR_PROGRESS p) =>
+                {
+                    Console.WriteLine("⚠ Posible dedo falso. Ajuste postura/presión.");
+                    return true;
+                };
+
+                enrollment.OnEnrollmentComplete += (bool success, int result) =>
+                {
+                    try
+                    {
+                        localResultCode = result;
+                        if (success)
+                        {
+                            localTemplate = enrollment.Template;
+                            Console.WriteLine($"✅ Enrolamiento OK. Template bytes: {localTemplate?.Length ?? 0}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"❌ Enrolamiento falló. {GetErrorDescription(result)}");
+                        }
+                    }
+                    finally
+                    {
+                        done.Set();
+                    }
+                };
+
+                Console.WriteLine("Iniciando captura de múltiples muestras…");
+                Console.WriteLine("Sugerencia: cada muestra, levante y vuelva a apoyar variando leve orientación/posición.");
+                enrollment.Enrollment();
+                done.WaitOne();
+
+                // Ahora sí, asignamos a los OUT fuera de la lambda
+                templateOut = localTemplate;
+                lastResultCodeOut = localResultCode;
+
+                return (localTemplate != null && localTemplate.Length > 0);
+            }
+
+
+            // Intentos con reintentos en códigos típicos de baja calidad/retirada rápida
+            int attempts = 0;
+            while (attempts <= retries)
+            {
+                attempts++;
+                Console.WriteLine($"\nIntento {attempts} de {retries + 1}");
+                if (TryCaptureOnce(out capturedTemplate, out int code))
+                {
+                    errorMessage = null;
+                    break;
+                }
+
+                // Reintentar sólo si es un problema típico de captura
+                if (code == 11 || code == 203 || code == 4)
+                {
+                    errorMessage = GetErrorDescription(code);
+                    Console.WriteLine("🔁 Reintentaremos la captura. Descanse la mano, limpie el sensor si es necesario.");
+                    Thread.Sleep(800);
+                    continue;
+                }
+                else
+                {
+                    errorMessage = GetErrorDescription(code);
+                    break;
+                }
+            }
 
             if (capturedTemplate != null && capturedTemplate.Length > 0)
             {
-                string outputFile = customPath ?? $"template_{DateTime.Now:yyyyMMdd_HHmmss}.ftr";
+                string outputFile = customPath;
+                if (string.IsNullOrWhiteSpace(outputFile))
+                {
+                    var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    var tag = string.IsNullOrWhiteSpace(fingerLabel) ? "template" : SanitizeFilePart(fingerLabel);
+                    outputFile = $"{tag}_{stamp}.ftr";
+                }
                 string fullPath = Path.GetFullPath(outputFile);
-
                 File.WriteAllBytes(fullPath, capturedTemplate);
                 Console.WriteLine($"✅ Template guardado: {fullPath}");
+
+                // Guarda metadatos útiles al lado (opcional)
+                var metaPath = Path.ChangeExtension(fullPath, ".meta.txt");
+                File.WriteAllText(metaPath,
+                    $"finger={fingerLabel ?? "unknown"}\n" +
+                    $"samples={samples}\n" +
+                    $"fastMode={fast}\n" +
+                    $"created={DateTime.Now:O}\n");
+                Console.WriteLine($"🗒 Metadatos: {metaPath}");
             }
             else
             {
@@ -153,9 +282,18 @@ namespace futronic_cli
             }
         }
 
+        // Limpia nombre de archivo
+        static string SanitizeFilePart(string s)
+        {
+            foreach (var ch in Path.GetInvalidFileNameChars())
+                s = s.Replace(ch, '_');
+            return s.Trim();
+        }
+
+
         static void VerifyFingerprint(string templatePath)
         {
-            // Verificar que existe el template de referencia
+            // 1) Validar y cargar template base de referencia
             if (!File.Exists(templatePath))
             {
                 Console.WriteLine($"❌ No se encuentra el archivo: {templatePath}");
@@ -165,138 +303,161 @@ namespace futronic_cli
             byte[] referenceTemplate = File.ReadAllBytes(templatePath);
             Console.WriteLine($"📁 Template de referencia cargado: {referenceTemplate.Length} bytes");
 
-            // Capturar huella actual para comparar
-            var captureComplete = new ManualResetEvent(false);
-            byte[] currentTemplate = null;
-            string errorMessage = null;
-
-            // Lee --samples (defecto 5)
+            // 2) Flags
             var args = Environment.GetCommandLineArgs();
-            int samples = GetIntArg(args, "--samples", 5);
-            if (samples < 1) samples = 1;
+            int farn = GetIntArg(args, "--farn", 1500);          // un poco más laxo que 1000
+            if (farn < 1) farn = 1;
+            int vRetries = GetIntArg(args, "--vretries", 2);     // reintentos de verificación
+            bool vfast = GetBoolArg(args, "--vfast", false);     // por defecto robusto
 
-            var enrollment = new FutronicEnrollment
+            Console.WriteLine("=== MODO VERIFICACIÓN (SDK Matcher) ===");
+            Console.WriteLine($"Config: FARN={farn} | Reintentos={vRetries} | FastMode={vfast}");
+
+            // 3) Función local: corre UNA verificación
+            // Corre UNA verificación
+            bool TryVerifyOnce(byte[] baseTemplate, out bool verified, out int resultCode, out int farnValue)
             {
-                FakeDetection = false,
-                MaxModels = samples,          // <<<<<< clave
-                MIOTControlOff = true
-            };
+                var done = new ManualResetEvent(false);
 
-            Console.WriteLine("=== MODO VERIFICACIÓN ===");
-            Console.WriteLine($"Capturando huella actual con {samples} muestra(s)…");
+                // <<< usar locales dentro de la lambda >>>
+                bool localVerified = false;
+                int localResultCode = 0;
+                int localFarnValue = -1;
 
-            enrollment.OnPutOn += (FTR_PROGRESS progress) =>
-            {
-                Console.WriteLine("→ Ponga el dedo para verificar...");
-            };
+                var verifier = new FutronicVerification(baseTemplate);
 
-            enrollment.OnTakeOff += (FTR_PROGRESS progress) =>
-            {
-                Console.WriteLine("→ Retire el dedo...");
-            };
+                // Ajustes (si existen en tu SDK; TrySetProperty evita romper si no están)
+                // Ajustes (minimalista para evitar crash por setters internos)
+                TrySetProperty(verifier, "FARN", farn);
 
-            enrollment.OnEnrollmentComplete += (bool success, int result) =>
-            {
-                try
+                // Si necesitas probar otros, habilítalos de a uno:
+                // TrySetProperty(verifier, "FastMode", vfast);
+                // TrySetProperty(verifier, "FakeDetection", false);
+                // TrySetProperty(verifier, "FFDControl", true);
+
+
+                verifier.OnPutOn += (FTR_PROGRESS p) =>
                 {
-                    if (success)
-                    {
-                        currentTemplate = enrollment.Template;
-                        Console.WriteLine($"✅ Huella actual capturada: {currentTemplate?.Length ?? 0} bytes");
-                    }
-                    else
-                    {
-                        errorMessage = GetErrorDescription(result);
-                        Console.WriteLine($"❌ Error capturando huella actual: {errorMessage}");
-                    }
-                }
-                finally
+                    Console.WriteLine("→ Ponga el dedo (verificación) …");
+                };
+
+                verifier.OnTakeOff += (FTR_PROGRESS p) =>
                 {
-                    captureComplete.Set();
-                }
-            };
+                    Console.WriteLine("→ Retire el dedo. Reposicione (gire 5–10°, varíe presión, cubra el centro).");
+                };
 
-            Console.WriteLine("=== MODO VERIFICACIÓN ===");
-            Console.WriteLine("Capture su huella para verificar...");
-            enrollment.Enrollment();
-            captureComplete.WaitOne();
+                verifier.OnFakeSource += (FTR_PROGRESS p) =>
+                {
+                    Console.WriteLine("⚠ Posible dedo falso. Ajuste postura/presión.");
+                    return true;
+                };
 
-            if (currentTemplate != null && currentTemplate.Length > 0)
+                verifier.OnVerificationComplete += (bool success, int result, bool verificationSuccess) =>
+                {
+                    try
+                    {
+                        localResultCode = result;
+                        if (success)
+                        {
+                            localVerified = verificationSuccess;
+
+                            // Leer FARNValue si existe
+                            var pInfo = verifier.GetType().GetProperty("FARNValue");
+                            if (pInfo != null && pInfo.CanRead)
+                            {
+                                try { localFarnValue = (int)pInfo.GetValue(verifier, null); } catch { localFarnValue = -1; }
+                            }
+                        }
+                        else
+                        {
+                            localVerified = false;
+                        }
+                    }
+                    finally
+                    {
+                        done.Set();
+                    }
+                };
+
+                Console.WriteLine("Iniciando verificación…");
+                verifier.Verification();
+                done.WaitOne();
+
+                // <<< asignar a los OUT fuera de la lambda >>>
+                verified = localVerified;
+                resultCode = localResultCode;
+                farnValue = localFarnValue;
+
+                return true; // la ejecución completó (independiente de si hubo match)
+            }
+
+            // 4) Intentos
+            bool finalVerified = false;
+            int finalCode = 0;
+            int finalFarnValue = -1;
+
+            for (int attempt = 0; attempt <= vRetries; attempt++)
             {
-                // Realizar verificación comparando templates directamente
-                try
+                if (attempt > 0)
                 {
-                    Console.WriteLine("🔍 Comparando huellas...");
-
-                    // Comparar directamente los templates
-                    bool templatesMatch = CompareTemplates(currentTemplate, referenceTemplate);
-
-                    Console.WriteLine("=== RESULTADO ===");
-                    if (templatesMatch)
-                    {
-                        Console.WriteLine("✅ ¡HUELLAS COINCIDEN! ✅");
-                        Console.WriteLine("La huella verificada pertenece al mismo dedo.");
-                    }
-                    else
-                    {
-                        Console.WriteLine("❌ HUELLAS NO COINCIDEN");
-                        Console.WriteLine("La huella no pertenece al mismo dedo.");
-                    }
+                    Console.WriteLine($"\n🔁 Reintento {attempt} de {vRetries} — Reposicione/rote ligeramente el dedo.");
+                    Thread.Sleep(500);
                 }
-                catch (Exception ex)
+
+                TryVerifyOnce(referenceTemplate, out bool ok, out int code, out int fValue);
+                finalVerified = ok;
+                finalCode = code;
+                finalFarnValue = fValue;
+
+                Console.WriteLine($"Resultado intento {attempt + 1}: {(ok ? "✅ Coinciden" : "❌ No coinciden")} | FAR alcanzado: {(fValue >= 0 ? fValue.ToString() : "N/D")}");
+
+                if (ok) break;
+
+                // Si fue un error típico de captura, permitimos reintentar
+                if (code == 11 || code == 203 || code == 4)
                 {
-                    Console.WriteLine($"❌ Error en verificación: {ex.Message}");
+                    continue;
                 }
+                // Si simplemente no coincidió, aún reintentamos hasta agotar vRetries
+            }
+
+            // 5) Resultado final
+            Console.WriteLine("\n=== RESULTADO FINAL ===");
+            if (finalVerified)
+            {
+                Console.WriteLine("✅ ¡HUELLAS COINCIDEN! (matcher SDK)");
+                Console.WriteLine($"ℹ FAR alcanzado: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
             }
             else
             {
-                Console.WriteLine($"❌ No se pudo capturar huella actual. {errorMessage}");
+                Console.WriteLine("❌ HUELLAS NO COINCIDEN (matcher SDK)");
+                Console.WriteLine($"ℹ FAR alcanzado: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
+                if (finalCode != 0)
+                    Console.WriteLine($"Detalles: {GetErrorDescription(finalCode)}");
+                Console.WriteLine("Sugerencias: varíe presión, cubra el centro, rote 5–10°, limpie el sensor.");
             }
 
             Console.WriteLine("\nPresione una tecla para salir.");
             Console.ReadKey();
         }
 
-        // Función auxiliar para comparar templates (aproximación básica)
-        static bool CompareTemplates(byte[] template1, byte[] template2)
+
+        // Helper para leer FARNValue si existe; si no, muestra "N/D"
+        static string GetFarnValueSafe(object verifier)
         {
-            if (template1.Length != template2.Length)
+            var p = verifier.GetType().GetProperty("FARNValue");
+            if (p != null && p.CanRead)
             {
-                Console.WriteLine($"🔍 Tamaños diferentes: {template1.Length} vs {template2.Length}");
-                return false;
-            }
-
-            // Comparación exacta (para templates idénticos)
-            bool exactMatch = true;
-            for (int i = 0; i < template1.Length; i++)
-            {
-                if (template1[i] != template2[i])
+                try
                 {
-                    exactMatch = false;
-                    break;
+                    var v = p.GetValue(verifier, null);
+                    return v?.ToString() ?? "N/D";
                 }
+                catch { }
             }
-
-            if (exactMatch)
-            {
-                Console.WriteLine("🔍 Coincidencia exacta: 100%");
-                return true;
-            }
-
-            // Comparación por similitud (contamos diferencias)
-            int differences = 0;
-            for (int i = 0; i < template1.Length; i++)
-            {
-                if (template1[i] != template2[i])
-                    differences++;
-            }
-
-            // Si menos del 10% de bytes son diferentes, consideramos que coincide
-            double similarity = 1.0 - (double)differences / template1.Length;
-            Console.WriteLine($"🔍 Similitud: {similarity:P1} ({differences} diferencias de {template1.Length})");
-
-            return similarity > 0.9; // 90% de similitud
+            return "N/D";
         }
+
 
         static string GetErrorDescription(int errorCode)
         {
