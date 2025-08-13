@@ -305,8 +305,15 @@ namespace futronic_cli
 
             // 2) Flags
             var args = Environment.GetCommandLineArgs();
-            int farn = GetIntArg(args, "--farn", 1500);          // un poco más laxo que 1000
+            int farn = GetIntArg(args, "--farn", 1000);
+
+            // Clamp al rango válido (tu SDK rechaza 1500 -> asumimos 1..1000)
             if (farn < 1) farn = 1;
+            if (farn > 1000)
+            {
+                Console.WriteLine($"(i) --farn {farn} fuera de rango; usando 1000.");
+                farn = 1000;
+            }
             int vRetries = GetIntArg(args, "--vretries", 2);     // reintentos de verificación
             bool vfast = GetBoolArg(args, "--vfast", false);     // por defecto robusto
 
