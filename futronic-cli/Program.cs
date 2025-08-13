@@ -1,5 +1,6 @@
 ﻿using Futronic.SDKHelper;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -22,8 +23,8 @@ namespace futronic_cli
                 {
                     Console.WriteLine("=== Futronic CLI ===");
                     Console.WriteLine("Uso:");
-                    Console.WriteLine("  futronic-cli.exe capture [archivo.tml] [--samples N]            - Enrolar y guardar en .tml (defecto 7 muestras)");
-                    Console.WriteLine("  futronic-cli.exe verify archivo.tml [--farn X]                   - Verificar contra .tml con FAR solicitado (defecto 100)");
+                    Console.WriteLine("  futronic-cli.exe capture [archivo.tml] [--demo-format]       - Capturar (--demo-format para compatibilidad)");
+                    Console.WriteLine("  futronic-cli.exe verify archivo.tml                         - Verificar (detecta formato automáticamente)");
                     Console.WriteLine("  futronic-cli.exe analyze archivo.tml                        - Analizar formato de template");
                     return;
                 }
@@ -53,6 +54,24 @@ namespace futronic_cli
                             return;
                         }
                         AnalyzeTemplate(args[1]);
+                        break;
+                    
+                    case "convert":
+                        if (args.Length < 3)
+                        {
+                            Console.WriteLine("❌ Uso: futronic-cli.exe convert <archivo_origen.tml> <archivo_destino.tml> [--to-demo]");
+                            return;
+                        }
+                        ConvertTemplate(args[1], args[2], GetBoolArg(args, "--to-demo", false));
+                        break;
+
+                    case "deep":
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("❌ Uso: futronic-cli.exe deep archivo.tml");
+                            return;
+                        }
+                        DeepAnalyzeTemplate(args[1]);
                         break;
 
                     default:
@@ -331,8 +350,22 @@ namespace futronic_cli
                 }
 
                 string fullPath = Path.GetFullPath(outputFile);
-                File.WriteAllBytes(fullPath, capturedTemplate);
-                Console.WriteLine($"\n✅ Template guardado exitosamente: {fullPath}");
+                bool saveAsDemo = GetBoolArg(args, "--demo-format", false);
+
+                if (saveAsDemo)
+                {
+                    // Guardar en formato compatible con demo
+                    string baseName = Path.GetFileNameWithoutExtension(outputFile);
+                    byte[] demoTemplate = ConvertToDemo(capturedTemplate, baseName);
+                    File.WriteAllBytes(fullPath, demoTemplate);
+                    Console.WriteLine($"✅ Template guardado en formato demo: {fullPath}");
+                }
+                else
+                {
+                    // Guardar template crudo (formato actual)
+                    File.WriteAllBytes(fullPath, capturedTemplate);
+                    Console.WriteLine($"✅ Template guardado en formato crudo: {fullPath}");
+                }
 
                 // Metadatos expandidos
                 var metaPath = Path.ChangeExtension(fullPath, ".meta.txt");
@@ -373,8 +406,27 @@ namespace futronic_cli
                 Environment.Exit(1);
             }
 
-            byte[] referenceTemplate = File.ReadAllBytes(templatePath);
-            Console.WriteLine($"📁 Template de referencia cargado: {referenceTemplate.Length} bytes");
+            byte[] fileData = File.ReadAllBytes(templatePath);
+            byte[] referenceTemplate;
+
+            // Detectar formato automáticamente
+            if (IsDemoFormat(fileData))
+            {
+                Console.WriteLine("🔍 Formato demo detectado, extrayendo template...");
+                referenceTemplate = ExtractFromDemo(fileData);
+                if (referenceTemplate == null)
+                {
+                    Console.WriteLine("❌ Error extrayendo template del formato demo");
+                    Environment.Exit(1);
+                }
+            }
+            else
+            {
+                Console.WriteLine("🔍 Formato crudo detectado");
+                referenceTemplate = fileData;
+            }
+
+            Console.WriteLine($"📁 Template de referencia: {referenceTemplate.Length} bytes");
 
             var args = Environment.GetCommandLineArgs();
             int farn = GetIntArg(args, "--farn", 100); // Más tolerante por defecto
@@ -696,6 +748,111 @@ namespace futronic_cli
             Console.WriteLine($"   Entropía aprox: {CalculateEntropy(templateData):F2}");
         }
 
+        static void ConvertTemplate(string inputPath, string outputPath, bool toDemoFormat)
+        {
+            if (!File.Exists(inputPath))
+            {
+                Console.WriteLine($"❌ No se encuentra: {inputPath}");
+                return;
+            }
+
+            byte[] inputData = File.ReadAllBytes(inputPath);
+            Console.WriteLine($"📁 Cargando: {inputPath} ({inputData.Length} bytes)");
+
+            if (toDemoFormat)
+            {
+                // Convertir template crudo a formato demo
+                byte[] demoTemplate = ConvertToDemo(inputData, Path.GetFileNameWithoutExtension(outputPath));
+                File.WriteAllBytes(outputPath, demoTemplate);
+                Console.WriteLine($"✅ Convertido a formato demo: {outputPath} ({demoTemplate.Length} bytes)");
+            }
+            else
+            {
+                // Extraer template crudo del formato demo
+                byte[] rawTemplate = ExtractFromDemo(inputData);
+                if (rawTemplate != null)
+                {
+                    File.WriteAllBytes(outputPath, rawTemplate);
+                    Console.WriteLine($"✅ Extraído template crudo: {outputPath} ({rawTemplate.Length} bytes)");
+                }
+                else
+                {
+                    Console.WriteLine("❌ No se pudo extraer template del formato demo");
+                }
+            }
+        }
+
+        static byte[] ConvertToDemo(byte[] rawTemplate, string name)
+        {
+            var buffer = new List<byte>();
+
+            // Los primeros 2 bytes del template crudo también van al inicio
+            if (rawTemplate.Length >= 2)
+            {
+                buffer.AddRange(new byte[] { rawTemplate[0], rawTemplate[1] });
+            }
+            else
+            {
+                buffer.AddRange(new byte[] { 0x00, 0x00 });
+            }
+
+            // Padding de 2 bytes
+            buffer.AddRange(new byte[] { 0x00, 0x00 });
+
+            // Nombre del archivo (16 bytes, null-terminated)
+            byte[] nameBytes = new byte[16];
+            if (!string.IsNullOrEmpty(name))
+            {
+                byte[] nameData = System.Text.Encoding.ASCII.GetBytes(name);
+                Array.Copy(nameData, nameBytes, Math.Min(nameData.Length, 15)); // Dejar al menos 1 byte para \0
+            }
+            buffer.AddRange(nameBytes);
+
+            // Template crudo completo
+            buffer.AddRange(rawTemplate);
+
+            return buffer.ToArray();
+        }
+
+        static byte[] ExtractFromDemo(byte[] demoTemplate)
+        {
+            try
+            {
+                if (demoTemplate.Length <= 20)
+                    return null;
+
+                // El template crudo empieza en el byte 20
+                byte[] rawTemplate = new byte[demoTemplate.Length - 20];
+                Array.Copy(demoTemplate, 20, rawTemplate, 0, rawTemplate.Length);
+
+                return rawTemplate;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static bool IsDemoFormat(byte[] templateData)
+        {
+            if (templateData.Length < 20) return false;
+
+            // Verificar si hay un string ASCII en la posición del nombre (bytes 4-19)
+            bool hasAsciiName = false;
+            for (int i = 4; i < 16 && i < templateData.Length; i++)
+            {
+                if (templateData[i] >= 32 && templateData[i] <= 126)
+                {
+                    hasAsciiName = true;
+                    break;
+                }
+                if (templateData[i] == 0) break; // Null terminator
+            }
+
+            // Si hay nombre ASCII y el template parece empezar en byte 20
+            return hasAsciiName && templateData.Length > 20;
+        }
+        
         static double CalculateEntropy(byte[] data)
         {
             var freq = new int[256];
@@ -719,6 +876,134 @@ namespace futronic_cli
             foreach (byte b in data)
                 if (b == value) count++;
             return count;
+        }
+
+        static void DeepAnalyzeTemplate(string templatePath)
+        {
+            if (!File.Exists(templatePath))
+            {
+                Console.WriteLine($"❌ No se encuentra el archivo: {templatePath}");
+                return;
+            }
+
+            byte[] data = File.ReadAllBytes(templatePath);
+
+            Console.WriteLine("=== ANÁLISIS PROFUNDO DE TEMPLATE ===");
+            Console.WriteLine($"📁 Archivo: {templatePath}");
+            Console.WriteLine($"📏 Tamaño total: {data.Length} bytes");
+
+            // Analizar todo el header (primeros 64 bytes)
+            Console.WriteLine("\n🔍 Header completo (primeros 64 bytes):");
+            for (int i = 0; i < Math.Min(64, data.Length); i += 16)
+            {
+                Console.Write($"[{i:X4}] ");
+
+                // Hex
+                for (int j = 0; j < 16 && i + j < data.Length; j++)
+                {
+                    Console.Write($"{data[i + j]:X2} ");
+                }
+
+                // Rellenar espacios si la línea no está completa
+                for (int j = data.Length - i; j < 16 && j >= 0; j++)
+                {
+                    Console.Write("   ");
+                }
+
+                Console.Write(" | ");
+
+                // ASCII
+                for (int j = 0; j < 16 && i + j < data.Length; j++)
+                {
+                    char c = (char)data[i + j];
+                    Console.Write(char.IsControl(c) ? '.' : c);
+                }
+
+                Console.WriteLine();
+            }
+
+            // Buscar patrones del template crudo dentro del archivo demo
+            Console.WriteLine("\n🔍 Buscando inicio del template crudo...");
+
+            // El template crudo típicamente empieza con estos patrones
+            byte[] patterns = { 0x05, 0x0D, 0x03, 0x03 }; // Tu template empieza con esto
+
+            for (int i = 0; i <= data.Length - 4; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < patterns.Length; j++)
+                {
+                    if (data[i + j] != patterns[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+
+                if (match)
+                {
+                    Console.WriteLine($"   ⮕ Patrón encontrado en offset: {i} (0x{i:X})");
+                    Console.WriteLine($"   ⮕ Template crudo probablemente empieza aquí");
+
+                    // Mostrar contexto alrededor del patrón
+                    int start = Math.Max(0, i - 8);
+                    int end = Math.Min(data.Length, i + 16);
+
+                    Console.Write($"   ⮕ Contexto: ");
+                    for (int k = start; k < end; k++)
+                    {
+                        if (k == i) Console.Write("[");
+                        Console.Write($"{data[k]:X2}");
+                        if (k == i + patterns.Length - 1) Console.Write("]");
+                        Console.Write(" ");
+                    }
+                    Console.WriteLine();
+
+                    // Si encontramos el inicio, calculemos el tamaño del header
+                    if (i > 0)
+                    {
+                        Console.WriteLine($"   ⮕ Tamaño del header: {i} bytes");
+                        Console.WriteLine($"   ⮕ Tamaño del template: {data.Length - i} bytes");
+                    }
+                    break;
+                }
+            }
+
+            // Análisis de estructura por campos
+            Console.WriteLine("\n📊 Análisis de campos (suposición):");
+            if (data.Length >= 4)
+            {
+                ushort field1 = BitConverter.ToUInt16(data, 0);
+                ushort field2 = BitConverter.ToUInt16(data, 2);
+                Console.WriteLine($"   Campo 1 (uint16): {field1} (0x{field1:X4})");
+                Console.WriteLine($"   Campo 2 (uint16): {field2} (0x{field2:X4})");
+
+                // ¿El primer campo es el tamaño?
+                if (field1 == data.Length || field1 == data.Length - 4 || field1 == data.Length - 2)
+                {
+                    Console.WriteLine($"   ⮕ Campo 1 parece ser el tamaño total del archivo");
+                }
+            }
+
+            // Buscar strings
+            Console.WriteLine("\n🔤 Strings encontrados:");
+            var currentString = new List<byte>();
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i] >= 32 && data[i] <= 126) // ASCII imprimible
+                {
+                    currentString.Add(data[i]);
+                }
+                else
+                {
+                    if (currentString.Count >= 3) // String de al menos 3 caracteres
+                    {
+                        string str = System.Text.Encoding.ASCII.GetString(currentString.ToArray());
+                        Console.WriteLine($"   [{i - currentString.Count}]: \"{str}\"");
+                    }
+                    currentString.Clear();
+                }
+            }
         }
 
         static string GetErrorDescription(int errorCode)
