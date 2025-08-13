@@ -21,8 +21,8 @@ namespace futronic_cli
                 {
                     Console.WriteLine("=== Futronic CLI ===");
                     Console.WriteLine("Uso:");
-                    Console.WriteLine("  futronic-cli.exe capture [archivo.ftr]  - Capturar huella");
-                    Console.WriteLine("  futronic-cli.exe verify archivo.ftr     - Verificar contra template");
+                    Console.WriteLine("  futronic-cli.exe capture [archivo.ftr] [--samples N]  - Capturar huella con N muestras (defecto 5)");
+                    Console.WriteLine("  futronic-cli.exe verify archivo.ftr [--samples N]     - Verificar capturando con N muestras (defecto 5)");
                     return;
                 }
 
@@ -56,18 +56,45 @@ namespace futronic_cli
             }
         }
 
+        static int GetIntArg(string[] args, string name, int defaultValue)
+        {
+            // Busca "--samples", "--farn", etc.
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 < args.Length && int.TryParse(args[i + 1], out int v))
+                        return v;
+                }
+                else if (args[i].StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = args[i].Substring(name.Length + 1);
+                    if (int.TryParse(val, out int v)) return v;
+                }
+            }
+            return defaultValue;
+        }
         static void CaptureFingerprint(string customPath = null)
         {
             var done = new ManualResetEvent(false);
             byte[] capturedTemplate = null;
             string errorMessage = null;
 
+            // Lee --samples (si no se pasó, usa 5)
+            // Nota: Environment.GetCommandLineArgs() incluye el exe, por eso Skip(1).
+            var args = Environment.GetCommandLineArgs();
+            int samples = GetIntArg(args, "--samples", 5);
+            if (samples < 1) samples = 1;
+
             var enrollment = new FutronicEnrollment
             {
                 FakeDetection = false,
-                MaxModels = 1,
+                MaxModels = samples,          // <<<<<< clave
                 MIOTControlOff = true
             };
+
+            Console.WriteLine($"=== MODO CAPTURA ===");
+            Console.WriteLine($"Usando {samples} muestra(s) para el enrolamiento…");
 
             enrollment.OnPutOn += (FTR_PROGRESS progress) =>
             {
@@ -143,12 +170,20 @@ namespace futronic_cli
             byte[] currentTemplate = null;
             string errorMessage = null;
 
+            // Lee --samples (defecto 5)
+            var args = Environment.GetCommandLineArgs();
+            int samples = GetIntArg(args, "--samples", 5);
+            if (samples < 1) samples = 1;
+
             var enrollment = new FutronicEnrollment
             {
                 FakeDetection = false,
-                MaxModels = 1,
+                MaxModels = samples,          // <<<<<< clave
                 MIOTControlOff = true
             };
+
+            Console.WriteLine("=== MODO VERIFICACIÓN ===");
+            Console.WriteLine($"Capturando huella actual con {samples} muestra(s)…");
 
             enrollment.OnPutOn += (FTR_PROGRESS progress) =>
             {
