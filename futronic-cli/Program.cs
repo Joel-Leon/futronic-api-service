@@ -1,8 +1,9 @@
-﻿using System;
+﻿using Futronic.SDKHelper;
+using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
-using Futronic.SDKHelper;
 
 namespace futronic_cli
 {
@@ -23,6 +24,7 @@ namespace futronic_cli
                     Console.WriteLine("Uso:");
                     Console.WriteLine("  futronic-cli.exe capture [archivo.tml] [--samples N]            - Enrolar y guardar en .tml (defecto 7 muestras)");
                     Console.WriteLine("  futronic-cli.exe verify archivo.tml [--farn X]                   - Verificar contra .tml con FAR solicitado (defecto 100)");
+                    Console.WriteLine("  futronic-cli.exe analyze archivo.tml                        - Analizar formato de template");
                     return;
                 }
 
@@ -42,6 +44,15 @@ namespace futronic_cli
                             return;
                         }
                         VerifyFingerprint(args[1]);
+                        break;
+
+                    case "analyze":
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("❌ Especifica el archivo: futronic-cli.exe analyze archivo.tml");
+                            return;
+                        }
+                        AnalyzeTemplate(args[1]);
                         break;
 
                     default:
@@ -171,13 +182,13 @@ namespace futronic_cli
                 TrySetProperty(enrollment, "FastMode", fast);
                 TrySetProperty(enrollment, "FFDControl", true);
                 TrySetProperty(enrollment, "FARN", 100); // Más tolerante que el default
-                
+
                 // Configuraciones adicionales para robustez
                 TrySetProperty(enrollment, "Version", 0x02030000); // Usar versión compatible
                 TrySetProperty(enrollment, "DetectFakeFinger", false); // Evitar falsos positivos
                 TrySetProperty(enrollment, "MIOTOff", 2000); // Timeout más generoso
                 TrySetProperty(enrollment, "DetectCore", true); // Mejorar detección del núcleo
-                
+
                 // Configuraciones de calidad de imagen
                 TrySetProperty(enrollment, "ImageQuality", 50); // Calidad mínima más baja
                 TrySetProperty(enrollment, "MaxImageSize", 0); // Sin límite de tamaño de imagen
@@ -219,14 +230,14 @@ namespace futronic_cli
                         {
                             localTemplate = enrollment.Template;
                             Console.WriteLine($"✅ Enrolamiento exitoso! Template: {localTemplate?.Length ?? 0} bytes");
-                            
+
                             // Información adicional del template
-                            try 
+                            try
                             {
                                 var version = enrollment.GetType().GetProperty("Version")?.GetValue(enrollment);
-                                if (version != null) 
+                                if (version != null)
                                     Console.WriteLine($"   Versión del template: 0x{version:X8}");
-                            } 
+                            }
                             catch { }
                         }
                         else
@@ -264,7 +275,7 @@ namespace futronic_cli
                 Console.WriteLine($"\n{'=',50}");
                 Console.WriteLine($"INTENTO {attempts} DE {retries + 1}");
                 Console.WriteLine($"{'=',50}");
-                
+
                 if (TryCaptureOnce(out capturedTemplate, out int code))
                 {
                     errorMessage = null;
@@ -367,7 +378,7 @@ namespace futronic_cli
 
             var args = Environment.GetCommandLineArgs();
             int farn = GetIntArg(args, "--farn", 100); // Más tolerante por defecto
-            
+
             // Rango ajustado para mejor usabilidad
             if (farn < 10) farn = 10;
             if (farn > 1000)
@@ -375,7 +386,7 @@ namespace futronic_cli
                 Console.WriteLine($"(i) --farn {farn} ajustado a 1000 (máximo permitido).");
                 farn = 1000;
             }
-            
+
             int vRetries = GetIntArg(args, "--vretries", 4); // Más intentos
             bool vfast = GetBoolArg(args, "--vfast", false);
 
@@ -398,12 +409,12 @@ namespace futronic_cli
                 TrySetProperty(verifier, "FastMode", vfast);
                 TrySetProperty(verifier, "FakeDetection", false); // Mejor compatibilidad
                 TrySetProperty(verifier, "FFDControl", true);
-                
+
                 // Configuraciones adicionales para mayor tolerancia
                 TrySetProperty(verifier, "MIOTOff", 3000); // Timeout más generoso
                 TrySetProperty(verifier, "DetectCore", true); // Mejor detección del núcleo
                 TrySetProperty(verifier, "Version", 0x02030000); // Versión compatible
-                
+
                 // Configuraciones de calidad más permisivas
                 TrySetProperty(verifier, "ImageQuality", 30); // Calidad mínima más baja
                 TrySetProperty(verifier, "MaxImageSize", 0); // Sin límite de tamaño
@@ -445,9 +456,9 @@ namespace futronic_cli
                                 }
                             }
                             catch { localFarnValue = -1; }
-                            
+
                             // Mostrar información de calidad si está disponible
-                            try 
+                            try
                             {
                                 var qualityProp = verifier.GetType().GetProperty("Quality");
                                 if (qualityProp != null && qualityProp.CanRead)
@@ -496,7 +507,7 @@ namespace futronic_cli
                 {
                     Console.WriteLine($"\n🔄 Intento {attempt + 1} de {vRetries + 1}");
                     Console.WriteLine("   Sugerencias para este intento:");
-                    
+
                     switch (attempt % 4)
                     {
                         case 1:
@@ -520,7 +531,7 @@ namespace futronic_cli
                 }
 
                 TryVerifyOnce(referenceTemplate, out bool isVerified, out int code, out int fValue);
-                
+
                 // Actualizar mejores resultados
                 if (isVerified)
                 {
@@ -538,7 +549,7 @@ namespace futronic_cli
                         bestFarnValue = fValue;
                         finalFarnValue = fValue;
                     }
-                    
+
                     string confidence = "";
                     if (fValue >= 0)
                     {
@@ -555,7 +566,7 @@ namespace futronic_cli
                         else
                             confidence = " (muy lejano)";
                     }
-                    
+
                     Console.WriteLine($"   ❌ Sin coincidencia. FAR: {(fValue >= 0 ? fValue.ToString() : "N/D")}{confidence}");
                 }
 
@@ -570,14 +581,14 @@ namespace futronic_cli
             Console.WriteLine("\n" + new string('=', 60));
             Console.WriteLine("RESULTADO FINAL DE VERIFICACIÓN");
             Console.WriteLine(new string('=', 60));
-            
+
             if (finalVerified)
             {
                 Console.WriteLine("🎉 ¡VERIFICACIÓN EXITOSA!");
                 Console.WriteLine("✅ Las huellas dactilares COINCIDEN");
                 Console.WriteLine($"📊 FAR alcanzado: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
                 Console.WriteLine($"🎯 Umbral configurado: {farn}");
-                
+
                 // Análisis mejorado del FAR
                 if (finalFarnValue >= 0)
                 {
@@ -596,7 +607,7 @@ namespace futronic_cli
                         // Esto no debería pasar si finalVerified es true, pero por seguridad
                         Console.WriteLine("⚠️ Coincidencia fuera del umbral configurado");
                     }
-                    
+
                     // Información técnica adicional
                     Console.WriteLine($"ℹ️  Interpretación FAR: Menor valor = mejor coincidencia");
                     Console.WriteLine($"ℹ️  Rango típico: 1-1000 (tu resultado: {finalFarnValue})");
@@ -608,10 +619,10 @@ namespace futronic_cli
                 Console.WriteLine("🚫 Las huellas dactilares NO coinciden");
                 Console.WriteLine($"📊 Mejor FAR obtenido: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
                 Console.WriteLine($"🎯 Umbral requerido: {farn}");
-                
+
                 if (finalCode != 0)
                     Console.WriteLine($"🔧 Detalles técnicos: {GetErrorDescription(finalCode)}");
-                
+
                 Console.WriteLine("\n💡 SUGERENCIAS PARA MEJORAR EL RECONOCIMIENTO:");
                 Console.WriteLine("• Limpie completamente el sensor con un paño suave");
                 Console.WriteLine("• Asegúrese de que el dedo no esté demasiado húmedo o seco");
@@ -626,19 +637,88 @@ namespace futronic_cli
             Console.ReadKey(true);
         }
 
-        static string GetFarnValueSafe(object verifier)
+        static void AnalyzeTemplate(string templatePath)
         {
-            var p = verifier.GetType().GetProperty("FARNValue");
-            if (p != null && p.CanRead)
+            if (!File.Exists(templatePath))
             {
-                try
-                {
-                    var v = p.GetValue(verifier, null);
-                    return v?.ToString() ?? "N/D";
-                }
-                catch { }
+                Console.WriteLine($"❌ No se encuentra el archivo: {templatePath}");
+                return;
             }
-            return "N/D";
+
+            byte[] templateData = File.ReadAllBytes(templatePath);
+
+            Console.WriteLine("=== ANÁLISIS DE TEMPLATE ===");
+            Console.WriteLine($"📁 Archivo: {templatePath}");
+            Console.WriteLine($"📏 Tamaño: {templateData.Length} bytes");
+
+            // Mostrar los primeros 32 bytes en hexadecimal
+            Console.WriteLine("\n🔍 Primeros 32 bytes (hex):");
+            for (int i = 0; i < Math.Min(32, templateData.Length); i++)
+            {
+                Console.Write($"{templateData[i]:X2} ");
+                if ((i + 1) % 16 == 0) Console.WriteLine();
+            }
+            Console.WriteLine();
+
+            // Mostrar como texto (caracteres imprimibles)
+            Console.WriteLine("🔤 Primeros 32 bytes (ASCII):");
+            for (int i = 0; i < Math.Min(32, templateData.Length); i++)
+            {
+                char c = (char)templateData[i];
+                Console.Write(char.IsControl(c) ? '.' : c);
+            }
+            Console.WriteLine();
+
+            // Buscar patrones típicos de headers
+            Console.WriteLine("\n🔍 Análisis de formato:");
+
+            // Verificar si parece un template ISO/ANSI
+            if (templateData.Length >= 4)
+            {
+                uint header = BitConverter.ToUInt32(templateData, 0);
+                Console.WriteLine($"Header (uint32): 0x{header:X8}");
+
+                if (header == 0x524D4946) // "FIMR"
+                    Console.WriteLine("   ⮕ Posible formato ISO/IEC 19794-2");
+                else if (header == 0x464D5200) // "FMR\0"
+                    Console.WriteLine("   ⮕ Posible formato ANSI 378");
+            }
+
+            // Verificar patrones de Futronic
+            if (templateData.Length >= 8)
+            {
+                Console.WriteLine($"Bytes 4-7: {templateData[4]:X2} {templateData[5]:X2} {templateData[6]:X2} {templateData[7]:X2}");
+            }
+
+            Console.WriteLine($"\n📊 Estadísticas:");
+            Console.WriteLine($"   Bytes cero: {CountBytes(templateData, 0)}");
+            Console.WriteLine($"   Bytes 0xFF: {CountBytes(templateData, 0xFF)}");
+            Console.WriteLine($"   Entropía aprox: {CalculateEntropy(templateData):F2}");
+        }
+
+        static double CalculateEntropy(byte[] data)
+        {
+            var freq = new int[256];
+            foreach (byte b in data) freq[b]++;
+
+            double entropy = 0.0;
+            foreach (int f in freq)
+            {
+                if (f > 0)
+                {
+                    double p = (double)f / data.Length;
+                    entropy -= p * Math.Log(p, 2.0); // Usar Math.Log con base 2
+                }
+            }
+            return entropy;
+        }
+
+        static int CountBytes(byte[] data, byte value)
+        {
+            int count = 0;
+            foreach (byte b in data)
+                if (b == value) count++;
+            return count;
         }
 
         static string GetErrorDescription(int errorCode)
