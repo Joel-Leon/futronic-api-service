@@ -171,13 +171,13 @@ namespace futronic_cli
                 TrySetProperty(enrollment, "FastMode", fast);
                 TrySetProperty(enrollment, "FFDControl", true);
                 TrySetProperty(enrollment, "FARN", 100); // Más tolerante que el default
-
+                
                 // Configuraciones adicionales para robustez
                 TrySetProperty(enrollment, "Version", 0x02030000); // Usar versión compatible
                 TrySetProperty(enrollment, "DetectFakeFinger", false); // Evitar falsos positivos
                 TrySetProperty(enrollment, "MIOTOff", 2000); // Timeout más generoso
                 TrySetProperty(enrollment, "DetectCore", true); // Mejorar detección del núcleo
-
+                
                 // Configuraciones de calidad de imagen
                 TrySetProperty(enrollment, "ImageQuality", 50); // Calidad mínima más baja
                 TrySetProperty(enrollment, "MaxImageSize", 0); // Sin límite de tamaño de imagen
@@ -219,14 +219,14 @@ namespace futronic_cli
                         {
                             localTemplate = enrollment.Template;
                             Console.WriteLine($"✅ Enrolamiento exitoso! Template: {localTemplate?.Length ?? 0} bytes");
-
+                            
                             // Información adicional del template
-                            try
+                            try 
                             {
                                 var version = enrollment.GetType().GetProperty("Version")?.GetValue(enrollment);
-                                if (version != null)
+                                if (version != null) 
                                     Console.WriteLine($"   Versión del template: 0x{version:X8}");
-                            }
+                            } 
                             catch { }
                         }
                         else
@@ -264,7 +264,7 @@ namespace futronic_cli
                 Console.WriteLine($"\n{'=',50}");
                 Console.WriteLine($"INTENTO {attempts} DE {retries + 1}");
                 Console.WriteLine($"{'=',50}");
-
+                
                 if (TryCaptureOnce(out capturedTemplate, out int code))
                 {
                     errorMessage = null;
@@ -367,7 +367,7 @@ namespace futronic_cli
 
             var args = Environment.GetCommandLineArgs();
             int farn = GetIntArg(args, "--farn", 100); // Más tolerante por defecto
-
+            
             // Rango ajustado para mejor usabilidad
             if (farn < 10) farn = 10;
             if (farn > 1000)
@@ -375,7 +375,7 @@ namespace futronic_cli
                 Console.WriteLine($"(i) --farn {farn} ajustado a 1000 (máximo permitido).");
                 farn = 1000;
             }
-
+            
             int vRetries = GetIntArg(args, "--vretries", 4); // Más intentos
             bool vfast = GetBoolArg(args, "--vfast", false);
 
@@ -398,12 +398,12 @@ namespace futronic_cli
                 TrySetProperty(verifier, "FastMode", vfast);
                 TrySetProperty(verifier, "FakeDetection", false); // Mejor compatibilidad
                 TrySetProperty(verifier, "FFDControl", true);
-
+                
                 // Configuraciones adicionales para mayor tolerancia
                 TrySetProperty(verifier, "MIOTOff", 3000); // Timeout más generoso
                 TrySetProperty(verifier, "DetectCore", true); // Mejor detección del núcleo
                 TrySetProperty(verifier, "Version", 0x02030000); // Versión compatible
-
+                
                 // Configuraciones de calidad más permisivas
                 TrySetProperty(verifier, "ImageQuality", 30); // Calidad mínima más baja
                 TrySetProperty(verifier, "MaxImageSize", 0); // Sin límite de tamaño
@@ -445,9 +445,9 @@ namespace futronic_cli
                                 }
                             }
                             catch { localFarnValue = -1; }
-
+                            
                             // Mostrar información de calidad si está disponible
-                            try
+                            try 
                             {
                                 var qualityProp = verifier.GetType().GetProperty("Quality");
                                 if (qualityProp != null && qualityProp.CanRead)
@@ -496,7 +496,7 @@ namespace futronic_cli
                 {
                     Console.WriteLine($"\n🔄 Intento {attempt + 1} de {vRetries + 1}");
                     Console.WriteLine("   Sugerencias para este intento:");
-
+                    
                     switch (attempt % 4)
                     {
                         case 1:
@@ -520,7 +520,7 @@ namespace futronic_cli
                 }
 
                 TryVerifyOnce(referenceTemplate, out bool isVerified, out int code, out int fValue);
-
+                
                 // Actualizar mejores resultados
                 if (isVerified)
                 {
@@ -538,18 +538,24 @@ namespace futronic_cli
                         bestFarnValue = fValue;
                         finalFarnValue = fValue;
                     }
-
+                    
                     string confidence = "";
                     if (fValue >= 0)
                     {
-                        if (fValue <= farn * 2)
-                            confidence = " (muy cerca del umbral)";
+                        if (fValue == 0)
+                            confidence = " (sin puntos de coincidencia detectados)";
+                        else if (fValue <= farn / 2)
+                            confidence = " (MUY CERCA - posición ligeramente diferente)";
+                        else if (fValue <= farn)
+                            confidence = " (CERCA - ajuste menor necesario)";
+                        else if (fValue <= farn * 2)
+                            confidence = " (moderadamente cerca)";
                         else if (fValue <= farn * 5)
-                            confidence = " (cercano)";
+                            confidence = " (algo lejano)";
                         else
-                            confidence = " (lejano)";
+                            confidence = " (muy lejano)";
                     }
-
+                    
                     Console.WriteLine($"   ❌ Sin coincidencia. FAR: {(fValue >= 0 ? fValue.ToString() : "N/D")}{confidence}");
                 }
 
@@ -564,19 +570,36 @@ namespace futronic_cli
             Console.WriteLine("\n" + new string('=', 60));
             Console.WriteLine("RESULTADO FINAL DE VERIFICACIÓN");
             Console.WriteLine(new string('=', 60));
-
+            
             if (finalVerified)
             {
                 Console.WriteLine("🎉 ¡VERIFICACIÓN EXITOSA!");
                 Console.WriteLine("✅ Las huellas dactilares COINCIDEN");
                 Console.WriteLine($"📊 FAR alcanzado: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
                 Console.WriteLine($"🎯 Umbral configurado: {farn}");
-
+                
+                // Análisis mejorado del FAR
                 if (finalFarnValue >= 0)
                 {
-                    double percentage = ((double)(farn - finalFarnValue) / farn) * 100;
-                    if (percentage > 0)
-                        Console.WriteLine($"💪 Margen de seguridad: {percentage:F1}%");
+                    if (finalFarnValue <= farn)
+                    {
+                        Console.WriteLine("✨ COINCIDENCIA EXCELENTE (dentro del umbral)");
+                        if (finalFarnValue <= farn / 10)
+                            Console.WriteLine("🏆 Calidad de coincidencia: PERFECTA");
+                        else if (finalFarnValue <= farn / 2)
+                            Console.WriteLine("🥇 Calidad de coincidencia: EXCELENTE");
+                        else
+                            Console.WriteLine("🥈 Calidad de coincidencia: BUENA");
+                    }
+                    else
+                    {
+                        // Esto no debería pasar si finalVerified es true, pero por seguridad
+                        Console.WriteLine("⚠️ Coincidencia fuera del umbral configurado");
+                    }
+                    
+                    // Información técnica adicional
+                    Console.WriteLine($"ℹ️  Interpretación FAR: Menor valor = mejor coincidencia");
+                    Console.WriteLine($"ℹ️  Rango típico: 1-1000 (tu resultado: {finalFarnValue})");
                 }
             }
             else
@@ -585,10 +608,10 @@ namespace futronic_cli
                 Console.WriteLine("🚫 Las huellas dactilares NO coinciden");
                 Console.WriteLine($"📊 Mejor FAR obtenido: {(finalFarnValue >= 0 ? finalFarnValue.ToString() : "N/D")}");
                 Console.WriteLine($"🎯 Umbral requerido: {farn}");
-
+                
                 if (finalCode != 0)
                     Console.WriteLine($"🔧 Detalles técnicos: {GetErrorDescription(finalCode)}");
-
+                
                 Console.WriteLine("\n💡 SUGERENCIAS PARA MEJORAR EL RECONOCIMIENTO:");
                 Console.WriteLine("• Limpie completamente el sensor con un paño suave");
                 Console.WriteLine("• Asegúrese de que el dedo no esté demasiado húmedo o seco");
