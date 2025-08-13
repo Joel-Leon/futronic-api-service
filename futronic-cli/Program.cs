@@ -23,7 +23,7 @@ namespace futronic_cli
                 {
                     Console.WriteLine("=== Futronic CLI ===");
                     Console.WriteLine("Uso:");
-                    Console.WriteLine("  futronic-cli.exe capture [archivo.tml] [--demo-format]       - Capturar (--demo-format para compatibilidad)");
+                    Console.WriteLine("  futronic-cli.exe capture [archivo.tml]                      - Capturar (formato demo estándar)");
                     Console.WriteLine("  futronic-cli.exe verify archivo.tml                         - Verificar (detecta formato automáticamente)");
                     Console.WriteLine("  futronic-cli.exe analyze archivo.tml                        - Analizar formato de template");
                     return;
@@ -350,7 +350,8 @@ namespace futronic_cli
                 }
 
                 string fullPath = Path.GetFullPath(outputFile);
-                bool saveAsDemo = GetBoolArg(args, "--demo-format", false);
+                // GetBoolArg(args, "--demo-format", false);
+                bool saveAsDemo = true;
 
                 if (saveAsDemo)
                 {
