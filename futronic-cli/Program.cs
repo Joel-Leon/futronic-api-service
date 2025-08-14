@@ -3,21 +3,38 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Linq;
 
 namespace futronic_cli
 {
     class Program
     {
+        // Estructura para almacenar información de cada imagen capturada
+        public class CapturedImage
+        {
+            public byte[] ImageData { get; set; }
+            public int SampleIndex { get; set; }
+            public DateTime CaptureTime { get; set; }
+            public double Quality { get; set; } // Calculado por análisis de imagen
+        }
+
         static void Main(string[] args)
         {
             try
             {
                 if (args.Length == 0)
                 {
-                    Console.WriteLine("=== Futronic CLI ===");
+                    Console.WriteLine("=== Futronic CLI - Gestión Inteligente de Huellas ===");
                     Console.WriteLine("Uso:");
-                    Console.WriteLine("  futronic-cli.exe capture [archivo.tml]    - Capturar huella");
-                    Console.WriteLine("  futronic-cli.exe verify archivo.tml       - Verificar huella");
+                    Console.WriteLine("  futronic-cli.exe capture <nombre_registro> [opciones]");
+                    Console.WriteLine("  futronic-cli.exe verify <nombre_registro> [opciones]");
+                    Console.WriteLine("\nOpciones de captura:");
+                    Console.WriteLine("  --samples N        Número de muestras (3-10, default: 5)");
+                    Console.WriteLine("  --fast            Modo rápido");
+                    Console.WriteLine("  --finger LABEL    Etiqueta del dedo");
+                    Console.WriteLine("  --output-dir DIR  Directorio base (default: './registros')");
+                    Console.WriteLine("\nEjemplo:");
+                    Console.WriteLine("  futronic-cli.exe capture juan_perez --samples 7 --finger pulgar_derecho");
                     return;
                 }
 
@@ -26,17 +43,21 @@ namespace futronic_cli
                 switch (command)
                 {
                     case "capture":
-                        string outputPath = args.Length > 1 ? args[1] : null;
-                        CaptureFingerprint(outputPath);
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("❌ Especifica el nombre del registro: futronic-cli.exe capture <nombre>");
+                            return;
+                        }
+                        CaptureFingerprint(args[1], args);
                         break;
 
                     case "verify":
                         if (args.Length < 2)
                         {
-                            Console.WriteLine("❌ Especifica el archivo: futronic-cli.exe verify archivo.tml");
+                            Console.WriteLine("❌ Especifica el nombre del registro: futronic-cli.exe verify <nombre>");
                             return;
                         }
-                        VerifyFingerprint(args[1]);
+                        VerifyFingerprint(args[1], args);
                         break;
 
                     default:
@@ -117,37 +138,57 @@ namespace futronic_cli
             return defaultValue;
         }
 
-        static void CaptureFingerprint(string customPath = null)
+        static string GetStringArg(string[] args, string name, string defaultValue)
         {
-            var args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                    return args[i + 1];
+            }
+            return defaultValue;
+        }
+
+        static void CaptureFingerprint(string registrationName, string[] args)
+        {
+            // Validar nombre del registro
+            registrationName = SanitizeFilename(registrationName);
+            if (string.IsNullOrWhiteSpace(registrationName))
+            {
+                Console.WriteLine("❌ Nombre de registro inválido");
+                Environment.Exit(1);
+            }
+
+            // Configuración
             int samples = GetIntArg(args, "--samples", 5);
             samples = Math.Max(3, Math.Min(10, samples));
-
             int retries = GetIntArg(args, "--retries", 3);
             bool fast = GetBoolArg(args, "--fast", false);
-            bool saveImages = GetBoolArg(args, "--save-images", true); // Nueva opción
+            string fingerLabel = GetStringArg(args, "--finger", "unknown");
+            string outputDir = GetStringArg(args, "--output-dir", "./registros");
 
-            string fingerLabel = null;
-            for (int i = 0; i < args.Length - 1; i++)
-                if (string.Equals(args[i], "--finger", StringComparison.OrdinalIgnoreCase))
-                    fingerLabel = args[i + 1];
+            // Crear estructura de directorios
+            string registrationDir = Path.Combine(outputDir, registrationName);
+            string imagesDir = Path.Combine(registrationDir, "images");
 
-            Console.WriteLine("=== CAPTURA DE HUELLA ===");
-            Console.WriteLine($"Muestras: {samples} | FastMode: {fast} | Reintentos: {retries}");
-            Console.WriteLine($"Guardar imágenes: {saveImages}");
-            if (!string.IsNullOrWhiteSpace(fingerLabel))
-                Console.WriteLine($"Etiqueta: {fingerLabel}");
+            Directory.CreateDirectory(registrationDir);
+            Directory.CreateDirectory(imagesDir);
+
+            Console.WriteLine("=== CAPTURA INTELIGENTE DE HUELLA ===");
+            Console.WriteLine($"📁 Registro: {registrationName}");
+            Console.WriteLine($"📂 Directorio: {registrationDir}");
+            Console.WriteLine($"🔬 Muestras objetivo: {samples} | Modo rápido: {fast}");
+            Console.WriteLine($"👆 Dedo: {fingerLabel}");
 
             byte[] capturedTemplate = null;
+            List<CapturedImage> allImages = new List<CapturedImage>();
             string errorMessage = null;
-            List<byte[]> capturedImages = new List<byte[]>(); // Para almacenar imágenes
 
-            bool TryCaptureOnce(out byte[] templateOut, out int lastResultCodeOut, out List<byte[]> imagesOut)
+            bool TryCaptureOnce(out byte[] templateOut, out int lastResultCodeOut, out List<CapturedImage> imagesOut)
             {
                 var done = new ManualResetEvent(false);
                 byte[] localTemplate = null;
                 int localResultCode = 0;
-                List<byte[]> localImages = new List<byte[]>();
+                List<CapturedImage> localImages = new List<CapturedImage>();
 
                 var enrollment = new FutronicEnrollment
                 {
@@ -167,77 +208,82 @@ namespace futronic_cli
 
                 int currentSample = 0;
 
-                // Capturar imágenes si está habilitado
-                if (saveImages)
+                // Configurar captura de imágenes
+                try
                 {
-                    try
+                    var eventInfo = enrollment.GetType().GetEvent("UpdateScreenImage");
+                    if (eventInfo != null)
                     {
-                        // Buscar el evento UpdateScreenImage
-                        var eventInfo = enrollment.GetType().GetEvent("UpdateScreenImage");
-                        if (eventInfo != null)
-                        {
-                            Console.WriteLine("✅ Configurando captura de imágenes...");
+                        Console.WriteLine("✅ Sistema de captura de imágenes activado");
 
-                            // Crear handler para capturar imágenes
-                            // El evento típicamente tiene firma: UpdateScreenImage(Bitmap bitmap)
-                            Action<object> imageHandler = (bitmap) =>
+                        Action<object> imageHandler = (bitmap) =>
+                        {
+                            try
                             {
-                                try
+                                if (bitmap != null)
                                 {
-                                    if (bitmap != null)
+                                    byte[] imageData = ConvertBitmapToBytes(bitmap);
+                                    if (imageData != null && imageData.Length > 0)
                                     {
-                                        // Convertir Bitmap a byte array (BMP format)
-                                        byte[] imageData = ConvertBitmapToBytes(bitmap);
-                                        if (imageData != null && imageData.Length > 0)
+                                        // Calcular calidad de la imagen
+                                        double quality = CalculateImageQuality(imageData);
+
+                                        var capturedImage = new CapturedImage
                                         {
-                                            localImages.Add(imageData);
-                                            Console.WriteLine($"📸 Imagen capturada: {imageData.Length} bytes");
-                                        }
+                                            ImageData = imageData,
+                                            SampleIndex = currentSample,
+                                            CaptureTime = DateTime.Now,
+                                            Quality = quality
+                                        };
+
+                                        localImages.Add(capturedImage);
+                                        Console.WriteLine($"📸 Imagen capturada - Muestra: {currentSample}, Calidad: {quality:F2}");
                                     }
                                 }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"⚠️ Error capturando imagen: {ex.Message}");
-                                }
-                            };
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"⚠️ Error capturando imagen: {ex.Message}");
+                            }
+                        };
 
-                            // Crear delegate del tipo correcto
-                            var handlerType = eventInfo.EventHandlerType;
-                            var convertedHandler = Delegate.CreateDelegate(handlerType, imageHandler.Target, imageHandler.Method);
-                            eventInfo.AddEventHandler(enrollment, convertedHandler);
-                        }
-                        else
-                        {
-                            Console.WriteLine("⚠️ Evento UpdateScreenImage no encontrado - imágenes no disponibles");
-                        }
+                        var handlerType = eventInfo.EventHandlerType;
+                        var convertedHandler = Delegate.CreateDelegate(handlerType, imageHandler.Target, imageHandler.Method);
+                        eventInfo.AddEventHandler(enrollment, convertedHandler);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Console.WriteLine($"⚠️ Error configurando captura de imágenes: {ex.Message}");
+                        Console.WriteLine("⚠️ Captura de imágenes no disponible");
                     }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Error configurando imágenes: {ex.Message}");
                 }
 
                 enrollment.OnPutOn += (FTR_PROGRESS p) =>
                 {
                     currentSample++;
                     Console.WriteLine($"→ Muestra {currentSample}/{samples}: Apoye el dedo firmemente.");
+                    Console.WriteLine("  💡 Consejo: Mantenga presión constante para mejor calidad");
                 };
 
                 enrollment.OnTakeOff += (FTR_PROGRESS p) =>
                 {
                     if (currentSample < samples)
                     {
-                        Console.WriteLine($"→ Muestra {currentSample} OK. Retire el dedo y vuelva a apoyar.");
+                        Console.WriteLine($"→ ✅ Muestra {currentSample} capturada. Retire el dedo completamente.");
+                        Console.WriteLine("  💡 Para la siguiente: varíe ligeramente rotación y presión");
                     }
                     else
                     {
-                        Console.WriteLine("→ Procesando template final...");
+                        Console.WriteLine("→ 🔄 Procesando template final...");
                     }
                 };
 
                 enrollment.OnFakeSource += (FTR_PROGRESS p) =>
                 {
-                    Console.WriteLine("⚠ Señal ambigua. Limpie el sensor y reposicione el dedo.");
+                    Console.WriteLine("⚠ Señal ambigua detectada. Limpie el sensor y reposicione.");
                     return true;
                 };
 
@@ -249,12 +295,13 @@ namespace futronic_cli
                         if (success)
                         {
                             localTemplate = enrollment.Template;
-                            Console.WriteLine($"✅ Captura exitosa! Template: {localTemplate?.Length ?? 0} bytes");
-                            Console.WriteLine($"📸 Imágenes capturadas: {localImages.Count}");
+                            Console.WriteLine($"✅ ¡Captura exitosa!");
+                            Console.WriteLine($"   📊 Template: {localTemplate?.Length ?? 0} bytes");
+                            Console.WriteLine($"   📸 Total de imágenes: {localImages.Count}");
                         }
                         else
                         {
-                            Console.WriteLine($"❌ Captura falló. {GetErrorDescription(result)}");
+                            Console.WriteLine($"❌ Captura falló: {GetErrorDescription(result)}");
                         }
                     }
                     finally
@@ -263,8 +310,12 @@ namespace futronic_cli
                     }
                 };
 
-                Console.WriteLine("\nIniciando captura...");
-                Console.WriteLine("Para cada muestra, varíe ligeramente la rotación y presión del dedo.");
+                Console.WriteLine("\n🚀 Iniciando proceso de captura...");
+                Console.WriteLine("📋 Instrucciones:");
+                Console.WriteLine("   • Cada muestra debe cubrir completamente el sensor");
+                Console.WriteLine("   • Varíe ligeramente la rotación entre muestras");
+                Console.WriteLine("   • Mantenga presión firme pero no excesiva");
+                Console.WriteLine();
 
                 enrollment.Enrollment();
                 done.WaitOne();
@@ -281,11 +332,11 @@ namespace futronic_cli
             while (attempts <= retries)
             {
                 attempts++;
-                Console.WriteLine($"\n{'=',40}");
-                Console.WriteLine($"INTENTO {attempts} DE {retries + 1}");
-                Console.WriteLine($"{'=',40}");
+                Console.WriteLine($"\n{'=',60}");
+                Console.WriteLine($"🎯 INTENTO {attempts} DE {retries + 1}");
+                Console.WriteLine($"{'=',60}");
 
-                if (TryCaptureOnce(out capturedTemplate, out int code, out capturedImages))
+                if (TryCaptureOnce(out capturedTemplate, out int code, out allImages))
                 {
                     errorMessage = null;
                     break;
@@ -303,7 +354,7 @@ namespace futronic_cli
                         shouldRetry = true;
                         break;
                     case 4:
-                        Console.WriteLine("🔄 Tiempo agotado. Reintente más deliberadamente.");
+                        Console.WriteLine("🔄 Tiempo agotado. Reintente con movimientos más controlados.");
                         shouldRetry = true;
                         break;
                     default:
@@ -313,8 +364,8 @@ namespace futronic_cli
 
                 if (shouldRetry && attempts <= retries)
                 {
-                    Console.WriteLine($"🔁 Reintentando en 2 segundos... ({retries + 1 - attempts} restantes)");
-                    Thread.Sleep(2000);
+                    Console.WriteLine($"🔁 Reintentando en 3 segundos... ({retries + 1 - attempts} intentos restantes)");
+                    Thread.Sleep(3000);
                 }
                 else
                 {
@@ -323,69 +374,200 @@ namespace futronic_cli
                 }
             }
 
-            // Guardar resultado
+            // Procesar y guardar resultados
             if (capturedTemplate != null && capturedTemplate.Length > 0)
             {
-                string outputFile = customPath;
-                if (string.IsNullOrWhiteSpace(outputFile))
+                Console.WriteLine($"\n🎉 ¡REGISTRO COMPLETADO EXITOSAMENTE!");
+                Console.WriteLine($"{'=',60}");
+
+                // Seleccionar las mejores imágenes
+                var selectedImages = SelectBestImages(allImages, samples);
+                Console.WriteLine($"📊 Análisis de calidad:");
+                Console.WriteLine($"   • Total capturadas: {allImages.Count} imágenes");
+                Console.WriteLine($"   • Seleccionadas: {selectedImages.Count} mejores");
+
+                // Guardar template
+                string templatePath = Path.Combine(registrationDir, $"{registrationName}.tml");
+                byte[] demoTemplate = ConvertToDemo(capturedTemplate, registrationName);
+                File.WriteAllBytes(templatePath, demoTemplate);
+                Console.WriteLine($"✅ Template guardado: {templatePath}");
+
+                // Guardar imágenes seleccionadas
+                Console.WriteLine($"\n📸 Guardando imágenes seleccionadas:");
+                for (int i = 0; i < selectedImages.Count; i++)
                 {
-                    var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    var tag = string.IsNullOrWhiteSpace(fingerLabel) ? "template" : SanitizeFilename(fingerLabel);
-                    outputFile = $"{tag}_{stamp}.tml";
+                    var img = selectedImages[i];
+                    string imagePath = Path.Combine(imagesDir, $"{registrationName}_best_{i + 1:D2}.bmp");
+                    File.WriteAllBytes(imagePath, img.ImageData);
+                    Console.WriteLine($"   📷 Imagen {i + 1}: calidad {img.Quality:F2} -> {Path.GetFileName(imagePath)}");
                 }
-                else if (string.IsNullOrWhiteSpace(Path.GetExtension(outputFile)))
+
+                // Guardar metadatos completos
+                var metaPath = Path.Combine(registrationDir, "metadata.json");
+                var metadata = new
                 {
-                    outputFile += ".tml";
-                }
-
-                // Guardar siempre en formato demo
-                byte[] demoTemplate = ConvertToDemo(capturedTemplate, Path.GetFileNameWithoutExtension(outputFile));
-                File.WriteAllBytes(outputFile, demoTemplate);
-                Console.WriteLine($"✅ Template guardado (formato demo): {outputFile}");
-
-                // Guardar imágenes capturadas como BMP
-                if (saveImages && capturedImages.Count > 0)
-                {
-                    Console.WriteLine($"\n📸 Guardando {capturedImages.Count} imágenes:");
-                    string baseDir = Path.GetDirectoryName(outputFile);
-                    string baseName = Path.GetFileNameWithoutExtension(outputFile);
-
-                    for (int i = 0; i < capturedImages.Count; i++)
+                    registrationName = registrationName,
+                    fingerLabel = fingerLabel,
+                    captureDate = DateTime.Now.ToString("O"),
+                    settings = new
                     {
-                        string imagePath = Path.Combine(baseDir, $"{baseName}_image_{i + 1:D2}.bmp");
-                        File.WriteAllBytes(imagePath, capturedImages[i]);
-                        Console.WriteLine($"   📷 Imagen {i + 1}: {imagePath} ({capturedImages[i].Length} bytes)");
-                    }
-                }
+                        samples = samples,
+                        fastMode = fast,
+                        retries = retries
+                    },
+                    results = new
+                    {
+                        templateSize = capturedTemplate.Length,
+                        totalImages = allImages.Count,
+                        selectedImages = selectedImages.Count,
+                        averageQuality = selectedImages.Average(img => img.Quality)
+                    },
+                    images = selectedImages.Select((img, idx) => new
+                    {
+                        index = idx + 1,
+                        quality = img.Quality,
+                        sampleIndex = img.SampleIndex,
+                        filename = $"{registrationName}_best_{idx + 1:D2}.bmp"
+                    }).ToArray()
+                };
 
-                // Guardar metadatos
-                var metaPath = Path.ChangeExtension(outputFile, ".meta.txt");
-                File.WriteAllText(metaPath,
-                    $"finger={fingerLabel ?? "unknown"}\n" +
-                    $"samples={samples}\n" +
-                    $"fastMode={fast}\n" +
-                    $"templateSize={capturedTemplate.Length}\n" +
-                    $"imagesCount={capturedImages.Count}\n" +
-                    $"saveImages={saveImages}\n" +
-                    $"created={DateTime.Now:O}\n");
-                Console.WriteLine($"📋 Metadatos: {metaPath}");
+                string jsonMetadata = System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+                File.WriteAllText(metaPath, jsonMetadata);
+                Console.WriteLine($"📋 Metadatos guardados: {metaPath}");
+
+                Console.WriteLine($"\n🏆 RESUMEN DEL REGISTRO:");
+                Console.WriteLine($"   📁 Directorio: {registrationDir}");
+                Console.WriteLine($"   📄 Template: {registrationName}.tml");
+                Console.WriteLine($"   📸 Imágenes: {selectedImages.Count} archivos BMP");
+                Console.WriteLine($"   📊 Calidad promedio: {selectedImages.Average(img => img.Quality):F2}");
+                Console.WriteLine($"   🔢 ID único: {registrationName}");
             }
             else
             {
-                Console.WriteLine($"\n❌ No se pudo capturar. {errorMessage}");
-                Console.WriteLine("Sugerencias:");
-                Console.WriteLine("• Limpie completamente el sensor");
-                Console.WriteLine("• Asegúrese de que el dedo esté limpio y seco");
-                Console.WriteLine("• Cubra completamente la superficie del sensor");
+                Console.WriteLine($"\n❌ REGISTRO FALLIDO");
+                Console.WriteLine($"🚫 No se pudo completar la captura: {errorMessage}");
+                Console.WriteLine("\n💡 Sugerencias para el próximo intento:");
+                Console.WriteLine("   • Limpie completamente el sensor con paño suave");
+                Console.WriteLine("   • Asegúrese de que el dedo esté limpio y seco (no demasiado)");
+                Console.WriteLine("   • Cubra toda la superficie del sensor");
+                Console.WriteLine("   • Mantenga el dedo quieto durante cada captura");
+                Console.WriteLine("   • Pruebe con diferente dedo si persisten los problemas");
                 Environment.Exit(1);
             }
         }
 
-        static void VerifyFingerprint(string templatePath)
+        static List<CapturedImage> SelectBestImages(List<CapturedImage> allImages, int targetSamples)
         {
+            if (allImages.Count == 0) return new List<CapturedImage>();
+
+            // Ordenar por calidad descendente
+            var sortedImages = allImages.OrderByDescending(img => img.Quality).ToList();
+
+            // Determinar cuántas imágenes seleccionar basado en el número capturado
+            int selectCount = 1; // Por defecto, siempre al menos 1
+
+            if (allImages.Count >= 5) selectCount = Math.Min(3, allImages.Count); // Si capturó 5+, tomar las mejores 3
+            else if (allImages.Count >= 4) selectCount = 2; // Si capturó 4, tomar las mejores 2
+            else if (allImages.Count >= 3) selectCount = 1; // Si capturó 3, tomar la mejor 1
+            else if (allImages.Count >= 2) selectCount = 1; // Si capturó 2, tomar la mejor 1
+
+            // Asegurar que no seleccionemos más de las disponibles
+            selectCount = Math.Min(selectCount, allImages.Count);
+
+            Console.WriteLine($"🔍 Selección inteligente:");
+            Console.WriteLine($"   • Imágenes disponibles: {allImages.Count}");
+            Console.WriteLine($"   • Seleccionando las mejores: {selectCount}");
+
+            var selected = sortedImages.Take(selectCount).ToList();
+
+            // Mostrar estadísticas
+            if (allImages.Count > 0)
+            {
+                Console.WriteLine($"   • Rango de calidad: {allImages.Min(img => img.Quality):F2} - {allImages.Max(img => img.Quality):F2}");
+                Console.WriteLine($"   • Calidad promedio seleccionadas: {selected.Average(img => img.Quality):F2}");
+            }
+
+            return selected;
+        }
+
+        static double CalculateImageQuality(byte[] imageData)
+        {
+            try
+            {
+                // Análisis básico de calidad basado en:
+                // 1. Entropía (variabilidad de píxeles)
+                // 2. Contraste
+                // 3. Presencia de detalles
+
+                if (imageData.Length < 100) return 0.0;
+
+                // Saltar header BMP si existe (típicamente primeros 54 bytes)
+                int startOffset = 54;
+                if (imageData.Length < startOffset) startOffset = 0;
+
+                byte[] pixelData = new byte[imageData.Length - startOffset];
+                Array.Copy(imageData, startOffset, pixelData, 0, pixelData.Length);
+
+                // Calcular entropía
+                var histogram = new int[256];
+                foreach (byte pixel in pixelData)
+                {
+                    histogram[pixel]++;
+                }
+
+                double entropy = 0.0;
+                foreach (int count in histogram)
+                {
+                    if (count > 0)
+                    {
+                        double probability = (double)count / pixelData.Length;
+                        entropy -= probability * Math.Log(probability, 2.0);
+                    }
+                }
+
+                // Calcular contraste (diferencia entre min y max)
+                byte minVal = pixelData.Min();
+                byte maxVal = pixelData.Max();
+                double contrast = (double)(maxVal - minVal) / 255.0;
+
+                // Calcular variabilidad local (gradiente promedio)
+                double avgGradient = 0.0;
+                if (pixelData.Length > 1)
+                {
+                    for (int i = 1; i < Math.Min(1000, pixelData.Length); i++)
+                    {
+                        avgGradient += Math.Abs(pixelData[i] - pixelData[i - 1]);
+                    }
+                    avgGradient /= Math.Min(1000, pixelData.Length - 1);
+                    avgGradient /= 255.0; // Normalizar
+                }
+
+                // Combinar métricas en un score de calidad (0-100)
+                double quality = (entropy / 8.0) * 40 + contrast * 30 + avgGradient * 30;
+                quality = Math.Max(0, Math.Min(100, quality));
+
+                return quality;
+            }
+            catch
+            {
+                return 50.0; // Calidad neutral por defecto
+            }
+        }
+
+        static void VerifyFingerprint(string registrationName, string[] args)
+        {
+            registrationName = SanitizeFilename(registrationName);
+            string outputDir = GetStringArg(args, "--output-dir", "./registros");
+            string registrationDir = Path.Combine(outputDir, registrationName);
+            string templatePath = Path.Combine(registrationDir, $"{registrationName}.tml");
+
             if (!File.Exists(templatePath))
             {
-                Console.WriteLine($"❌ No se encuentra: {templatePath}");
+                Console.WriteLine($"❌ No se encuentra el registro: {registrationName}");
+                Console.WriteLine($"   📁 Buscado en: {templatePath}");
                 Environment.Exit(1);
             }
 
@@ -399,17 +581,17 @@ namespace futronic_cli
                 Environment.Exit(1);
             }
 
-            Console.WriteLine($"📁 Template cargado: {referenceTemplate.Length} bytes");
+            Console.WriteLine($"=== VERIFICACIÓN DE HUELLA ===");
+            Console.WriteLine($"📁 Registro: {registrationName}");
+            Console.WriteLine($"📄 Template cargado: {referenceTemplate.Length} bytes");
 
-            var args = Environment.GetCommandLineArgs();
-            int farn = GetIntArg(args, "--farn", 100);
+            var farn = GetIntArg(args, "--farn", 100);
             farn = Math.Max(10, Math.Min(1000, farn));
 
             int vRetries = GetIntArg(args, "--vretries", 3);
             bool vfast = GetBoolArg(args, "--vfast", false);
 
-            Console.WriteLine("=== VERIFICACIÓN DE HUELLA ===");
-            Console.WriteLine($"FARN: {farn} (menor = más tolerante) | Reintentos: {vRetries}");
+            Console.WriteLine($"🔧 Configuración: FARN={farn} | Reintentos={vRetries}");
 
             bool TryVerifyOnce(byte[] baseTemplate, out bool verified, out int resultCode, out int farnValue)
             {
@@ -437,7 +619,7 @@ namespace futronic_cli
 
                 verifier.OnTakeOff += (FTR_PROGRESS p) =>
                 {
-                    Console.WriteLine("🔍 Procesando verificación...");
+                    Console.WriteLine("🔍 Analizando coincidencia...");
                 };
 
                 verifier.OnFakeSource += (FTR_PROGRESS p) =>
@@ -493,7 +675,7 @@ namespace futronic_cli
                 if (attempt > 0)
                 {
                     Console.WriteLine($"\n🔄 Intento {attempt + 1} de {vRetries + 1}");
-                    Console.WriteLine("   Sugerencia: Varíe ligeramente la posición/rotación del dedo");
+                    Console.WriteLine("   💡 Varíe ligeramente la posición/rotación del dedo");
                     Thread.Sleep(1000);
                 }
 
@@ -504,7 +686,7 @@ namespace futronic_cli
                     finalVerified = true;
                     finalCode = code;
                     finalFarnValue = fValue;
-                    Console.WriteLine($"   ✅ ¡COINCIDENCIA! FAR: {(fValue >= 0 ? fValue.ToString() : "N/D")}");
+                    Console.WriteLine($"   ✅ ¡COINCIDENCIA CONFIRMADA! FAR: {(fValue >= 0 ? fValue.ToString() : "N/D")}");
                     break;
                 }
                 else
@@ -516,9 +698,9 @@ namespace futronic_cli
                     if (fValue >= 0)
                     {
                         if (fValue <= farn / 2)
-                            confidence = " (MUY CERCA)";
+                            confidence = " (MUY CERCA - casi coincide)";
                         else if (fValue <= farn)
-                            confidence = " (CERCA)";
+                            confidence = " (CERCA - ajuste menor)";
                         else
                             confidence = " (lejano)";
                     }
@@ -536,30 +718,30 @@ namespace futronic_cli
             if (finalVerified)
             {
                 Console.WriteLine("🎉 ¡VERIFICACIÓN EXITOSA!");
-                Console.WriteLine("✅ Las huellas COINCIDEN");
+                Console.WriteLine($"✅ La huella COINCIDE con el registro '{registrationName}'");
                 if (finalFarnValue >= 0)
                 {
-                    Console.WriteLine($"📊 FAR: {finalFarnValue} (umbral: {farn})");
+                    Console.WriteLine($"📊 FAR obtenido: {finalFarnValue} (umbral: {farn})");
                     if (finalFarnValue <= farn / 10)
-                        Console.WriteLine("🏆 Calidad: PERFECTA");
+                        Console.WriteLine("🏆 Calidad de coincidencia: PERFECTA");
                     else if (finalFarnValue <= farn / 2)
-                        Console.WriteLine("🥇 Calidad: EXCELENTE");
+                        Console.WriteLine("🥇 Calidad de coincidencia: EXCELENTE");
                     else
-                        Console.WriteLine("🥈 Calidad: BUENA");
+                        Console.WriteLine("🥈 Calidad de coincidencia: BUENA");
                 }
             }
             else
             {
                 Console.WriteLine("❌ VERIFICACIÓN FALLIDA");
-                Console.WriteLine("🚫 Las huellas NO coinciden");
+                Console.WriteLine($"🚫 La huella NO coincide con '{registrationName}'");
                 if (finalFarnValue >= 0)
-                    Console.WriteLine($"📊 Mejor FAR: {finalFarnValue} (necesario: ≤{farn})");
+                    Console.WriteLine($"📊 Mejor FAR obtenido: {finalFarnValue} (necesario: ≤{farn})");
 
-                Console.WriteLine("\n💡 Sugerencias:");
-                Console.WriteLine("• Limpie el sensor completamente");
-                Console.WriteLine("• Pruebe diferentes ángulos de rotación");
-                Console.WriteLine("• Varíe la presión aplicada");
-                Console.WriteLine($"• Use un FARN más alto: --farn {Math.Min(farn * 2, 1000)}");
+                Console.WriteLine("\n💡 Sugerencias para mejorar el reconocimiento:");
+                Console.WriteLine("   • Limpie completamente el sensor");
+                Console.WriteLine("   • Pruebe diferentes ángulos de rotación");
+                Console.WriteLine("   • Varíe la presión aplicada");
+                Console.WriteLine($"   • Use un FARN más tolerante: --farn {Math.Min(farn * 2, 1000)}");
             }
 
             Console.WriteLine(new string('=', 50));
@@ -661,13 +843,24 @@ namespace futronic_cli
             return rawTemplate;
         }
 
-
-
         static string SanitizeFilename(string filename)
         {
+            if (string.IsNullOrWhiteSpace(filename)) return "";
+
             foreach (char c in Path.GetInvalidFileNameChars())
                 filename = filename.Replace(c, '_');
-            return filename.Trim();
+
+            foreach (char c in Path.GetInvalidPathChars())
+                filename = filename.Replace(c, '_');
+
+            // Eliminar espacios múltiples y trim
+            filename = System.Text.RegularExpressions.Regex.Replace(filename.Trim(), @"\s+", "_");
+
+            // Limitar longitud
+            if (filename.Length > 100)
+                filename = filename.Substring(0, 100);
+
+            return filename;
         }
 
         static string GetErrorDescription(int errorCode)
