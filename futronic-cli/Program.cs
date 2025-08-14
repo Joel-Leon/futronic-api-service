@@ -125,6 +125,7 @@ namespace futronic_cli
 
             int retries = GetIntArg(args, "--retries", 3);
             bool fast = GetBoolArg(args, "--fast", false);
+            bool saveImages = GetBoolArg(args, "--save-images", true); // Nueva opción
 
             string fingerLabel = null;
             for (int i = 0; i < args.Length - 1; i++)
@@ -133,17 +134,20 @@ namespace futronic_cli
 
             Console.WriteLine("=== CAPTURA DE HUELLA ===");
             Console.WriteLine($"Muestras: {samples} | FastMode: {fast} | Reintentos: {retries}");
+            Console.WriteLine($"Guardar imágenes: {saveImages}");
             if (!string.IsNullOrWhiteSpace(fingerLabel))
                 Console.WriteLine($"Etiqueta: {fingerLabel}");
 
             byte[] capturedTemplate = null;
             string errorMessage = null;
+            List<byte[]> capturedImages = new List<byte[]>(); // Para almacenar imágenes
 
-            bool TryCaptureOnce(out byte[] templateOut, out int lastResultCodeOut)
+            bool TryCaptureOnce(out byte[] templateOut, out int lastResultCodeOut, out List<byte[]> imagesOut)
             {
                 var done = new ManualResetEvent(false);
                 byte[] localTemplate = null;
                 int localResultCode = 0;
+                List<byte[]> localImages = new List<byte[]>();
 
                 var enrollment = new FutronicEnrollment
                 {
@@ -162,6 +166,56 @@ namespace futronic_cli
                 TrySetProperty(enrollment, "ImageQuality", 50);
 
                 int currentSample = 0;
+
+                // Capturar imágenes si está habilitado
+                if (saveImages)
+                {
+                    try
+                    {
+                        // Buscar el evento UpdateScreenImage
+                        var eventInfo = enrollment.GetType().GetEvent("UpdateScreenImage");
+                        if (eventInfo != null)
+                        {
+                            Console.WriteLine("✅ Configurando captura de imágenes...");
+
+                            // Crear handler para capturar imágenes
+                            // El evento típicamente tiene firma: UpdateScreenImage(Bitmap bitmap)
+                            Action<object> imageHandler = (bitmap) =>
+                            {
+                                try
+                                {
+                                    if (bitmap != null)
+                                    {
+                                        // Convertir Bitmap a byte array (BMP format)
+                                        byte[] imageData = ConvertBitmapToBytes(bitmap);
+                                        if (imageData != null && imageData.Length > 0)
+                                        {
+                                            localImages.Add(imageData);
+                                            Console.WriteLine($"📸 Imagen capturada: {imageData.Length} bytes");
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"⚠️ Error capturando imagen: {ex.Message}");
+                                }
+                            };
+
+                            // Crear delegate del tipo correcto
+                            var handlerType = eventInfo.EventHandlerType;
+                            var convertedHandler = Delegate.CreateDelegate(handlerType, imageHandler.Target, imageHandler.Method);
+                            eventInfo.AddEventHandler(enrollment, convertedHandler);
+                        }
+                        else
+                        {
+                            Console.WriteLine("⚠️ Evento UpdateScreenImage no encontrado - imágenes no disponibles");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️ Error configurando captura de imágenes: {ex.Message}");
+                    }
+                }
 
                 enrollment.OnPutOn += (FTR_PROGRESS p) =>
                 {
@@ -196,6 +250,7 @@ namespace futronic_cli
                         {
                             localTemplate = enrollment.Template;
                             Console.WriteLine($"✅ Captura exitosa! Template: {localTemplate?.Length ?? 0} bytes");
+                            Console.WriteLine($"📸 Imágenes capturadas: {localImages.Count}");
                         }
                         else
                         {
@@ -216,6 +271,7 @@ namespace futronic_cli
 
                 templateOut = localTemplate;
                 lastResultCodeOut = localResultCode;
+                imagesOut = localImages;
 
                 return (localTemplate != null && localTemplate.Length > 0);
             }
@@ -229,7 +285,7 @@ namespace futronic_cli
                 Console.WriteLine($"INTENTO {attempts} DE {retries + 1}");
                 Console.WriteLine($"{'=',40}");
 
-                if (TryCaptureOnce(out capturedTemplate, out int code))
+                if (TryCaptureOnce(out capturedTemplate, out int code, out capturedImages))
                 {
                     errorMessage = null;
                     break;
@@ -287,6 +343,21 @@ namespace futronic_cli
                 File.WriteAllBytes(outputFile, demoTemplate);
                 Console.WriteLine($"✅ Template guardado (formato demo): {outputFile}");
 
+                // Guardar imágenes capturadas como BMP
+                if (saveImages && capturedImages.Count > 0)
+                {
+                    Console.WriteLine($"\n📸 Guardando {capturedImages.Count} imágenes:");
+                    string baseDir = Path.GetDirectoryName(outputFile);
+                    string baseName = Path.GetFileNameWithoutExtension(outputFile);
+
+                    for (int i = 0; i < capturedImages.Count; i++)
+                    {
+                        string imagePath = Path.Combine(baseDir, $"{baseName}_image_{i + 1:D2}.bmp");
+                        File.WriteAllBytes(imagePath, capturedImages[i]);
+                        Console.WriteLine($"   📷 Imagen {i + 1}: {imagePath} ({capturedImages[i].Length} bytes)");
+                    }
+                }
+
                 // Guardar metadatos
                 var metaPath = Path.ChangeExtension(outputFile, ".meta.txt");
                 File.WriteAllText(metaPath,
@@ -294,6 +365,8 @@ namespace futronic_cli
                     $"samples={samples}\n" +
                     $"fastMode={fast}\n" +
                     $"templateSize={capturedTemplate.Length}\n" +
+                    $"imagesCount={capturedImages.Count}\n" +
+                    $"saveImages={saveImages}\n" +
                     $"created={DateTime.Now:O}\n");
                 Console.WriteLine($"📋 Metadatos: {metaPath}");
             }
@@ -490,6 +563,61 @@ namespace futronic_cli
             }
 
             Console.WriteLine(new string('=', 50));
+        }
+
+        static byte[] ConvertBitmapToBytes(object bitmap)
+        {
+            try
+            {
+                // Usar reflexión para trabajar con System.Drawing.Bitmap sin referencia directa
+                var bitmapType = bitmap.GetType();
+
+                // Verificar que sea un Bitmap
+                if (bitmapType.FullName != "System.Drawing.Bitmap")
+                {
+                    Console.WriteLine($"⚠️ Tipo inesperado: {bitmapType.FullName}");
+                    return null;
+                }
+
+                // Usar el método Save para convertir a BMP
+                using (var memoryStream = new MemoryStream())
+                {
+                    // Obtener ImageFormat.Bmp usando reflexión
+                    var imageFormatType = bitmapType.Assembly.GetType("System.Drawing.Imaging.ImageFormat");
+                    if (imageFormatType != null)
+                    {
+                        var bmpFormatProp = imageFormatType.GetProperty("Bmp");
+                        if (bmpFormatProp != null)
+                        {
+                            var bmpFormat = bmpFormatProp.GetValue(null);
+
+                            // Llamar bitmap.Save(stream, ImageFormat.Bmp)
+                            var saveMethod = bitmapType.GetMethod("Save", new Type[] { typeof(Stream), bmpFormat.GetType() });
+                            if (saveMethod != null)
+                            {
+                                saveMethod.Invoke(bitmap, new object[] { memoryStream, bmpFormat });
+                                return memoryStream.ToArray();
+                            }
+                        }
+                    }
+
+                    // Fallback: guardar sin formato específico (puede funcionar)
+                    var saveMethodSimple = bitmapType.GetMethod("Save", new Type[] { typeof(Stream) });
+                    if (saveMethodSimple != null)
+                    {
+                        saveMethodSimple.Invoke(bitmap, new object[] { memoryStream });
+                        return memoryStream.ToArray();
+                    }
+                }
+
+                Console.WriteLine("⚠️ No se pudo convertir bitmap a bytes");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Error convirtiendo bitmap: {ex.Message}");
+                return null;
+            }
         }
 
         static byte[] ConvertToDemo(byte[] rawTemplate, string name)
