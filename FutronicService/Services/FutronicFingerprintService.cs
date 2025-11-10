@@ -29,10 +29,11 @@ namespace FutronicService.Services
         // Configuraciones
   private int _threshold;
         private int _timeout;
-        private string _tempPath;
-        private bool _overwriteExisting;
-        private int _maxTemplatesPerIdentify;
-        private int _deviceCheckRetries = 3;
+     private string _tempPath;
+        private string _capturePath;
+   private bool _overwriteExisting;
+  private int _maxTemplatesPerIdentify;
+    private int _deviceCheckRetries = 3;
         private int _deviceCheckDelayMs = 1000;
         private int _maxRotation = 199; // Valor más restrictivo (166 por defecto en SDK, 199 más estricto)
 
@@ -50,13 +51,14 @@ namespace FutronicService.Services
             _threshold = _configuration.GetValue<int>("Fingerprint:Threshold", 70);
             _timeout = _configuration.GetValue<int>("Fingerprint:Timeout", 30000);
      _tempPath = _configuration.GetValue<string>("Fingerprint:TempPath", "C:/temp/fingerprints");
+  _capturePath = _configuration.GetValue<string>("Fingerprint:CapturePath", "C:/temp/fingerprints/captures");
       _overwriteExisting = _configuration.GetValue<bool>("Fingerprint:OverwriteExisting", false);
    _maxTemplatesPerIdentify = _configuration.GetValue<int>("Fingerprint:MaxTemplatesPerIdentify", 500);
         _deviceCheckRetries = _configuration.GetValue<int>("Fingerprint:DeviceCheckRetries", 3);
-         _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
+     _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
     _maxRotation = _configuration.GetValue<int>("Fingerprint:MaxRotation", 199); // 199 es más restrictivo, 166 es el default del SDK
 
-     _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, MaxRotation={_maxRotation}, Retries={_deviceCheckRetries}");
+     _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, MaxRotation={_maxRotation}, CapturePath={_capturePath}");
         }
 
      [HandleProcessCorruptedStateExceptions]
@@ -277,17 +279,18 @@ else
 
  // Guardar template en archivo temporal formato .tml
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-           string templatePath = Path.Combine(_tempPath, $"capture_{timestamp}.tml");
-    Directory.CreateDirectory(_tempPath);
+     string templatePath = Path.Combine(_capturePath, $"capture_{timestamp}.tml");
+    Directory.CreateDirectory(_capturePath);
 
       // Convertir a formato .tml
        byte[] demoTemplate = TemplateUtils.ConvertToDemo(captureResult.Template, $"capture_{timestamp}");
-         File.WriteAllBytes(templatePath, demoTemplate);
+    File.WriteAllBytes(templatePath, demoTemplate);
 
-  Console.WriteLine($"\n? Huella capturada y guardada");
-          Console.WriteLine($"   ?? Archivo: {Path.GetFileName(templatePath)}");
+  Console.WriteLine($"\n? Huella capturada y guardada (TEMPORAL)");
+    Console.WriteLine($"   ?? Archivo: {Path.GetFileName(templatePath)}");
   Console.WriteLine($"   ?? Ruta: {templatePath}");
- Console.WriteLine($"   ?? Tamaño: {demoTemplate.Length} bytes\n");
+ Console.WriteLine($"   ?? Tamaño: {demoTemplate.Length} bytes");
+        Console.WriteLine($"   ??  Esta captura es temporal y no está asociada a ningún DNI\n");
 
              var responseData = new CaptureResponseData
           {

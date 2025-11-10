@@ -136,7 +136,7 @@ public async Task<IActionResult> VerifySimple([FromBody] VerifySimpleRequest req
         {
      _logger.LogInformation($"RegisterMultiSample endpoint called for DNI: {request?.Dni}, Samples: {request?.SampleCount ?? 5}");
 
-            if (request == null)
+        if (request == null)
   {
        return BadRequest(ApiResponse<object>.ErrorResponse("Request body es requerido", "INVALID_INPUT"));
    }
@@ -144,12 +144,36 @@ public async Task<IActionResult> VerifySimple([FromBody] VerifySimpleRequest req
     var result = await _fingerprintService.RegisterMultiSampleAsync(request);
 
        if (!result.Success)
-            {
-      return GetErrorStatusCode(result);
+  {
+    return GetErrorStatusCode(result);
   }
 
      return Ok(result);
         }
+
+        /// <summary>
+        /// POST /api/fingerprint/capture
+        /// Captura una huella temporal sin asociarla a DNI (para testing)
+   /// </summary>
+   [HttpPost("capture")]
+        public async Task<IActionResult> Capture([FromBody] CaptureRequest request)
+        {
+            _logger.LogInformation("Capture endpoint called");
+
+            if (request == null)
+            {
+                request = new CaptureRequest(); // Usar valores por defecto
+  }
+
+    var result = await _fingerprintService.CaptureAsync(request);
+
+   if (!result.Success)
+  {
+    return GetErrorStatusCode(result);
+    }
+
+            return Ok(result);
+     }
 
   private IActionResult GetErrorStatusCode<T>(ApiResponse<T> response)
         {

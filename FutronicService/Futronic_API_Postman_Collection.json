@@ -38,7 +38,7 @@
           "host": ["{{base_url}}"],
           "path": ["api", "fingerprint", "capture"]
         },
-        "description": "Captura una huella temporal sin guardarla con DNI específico. Útil para testing."
+        "description": "Captura una huella temporal sin asociarla a DNI. Se guarda en CapturePath (C:/temp/fingerprints/captures). Útil para testing y pruebas rápidas del dispositivo. NO requiere DNI ni dedo."
       }
     },
     {
