@@ -1,0 +1,118 @@
+{
+  "info": {
+    "name": "Futronic API - Servicio de Huellas",
+    "_postman_id": "futronic-api-v1",
+    "description": "API REST para captura, registro, verificación e identificación de huellas dactilares usando dispositivos Futronic",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Verifica el estado del servicio y el dispositivo Futronic"
+      }
+    },
+    {
+      "name": "Capturar Huella (sin registro)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"timeout\": 30000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/fingerprint/capture",
+          "host": ["{{base_url}}"],
+          "path": ["api", "fingerprint", "capture"]
+        },
+        "description": "Captura una huella temporal sin guardarla con DNI específico. Útil para testing."
+      }
+    },
+    {
+      "name": "Registrar Huella (Multi-Muestra)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dni\": \"12345678\",\n  \"dedo\": \"indice-derecho\",\n  \"outputPath\": \"C:/temp/fingerprints\",\n  \"sampleCount\": 5,\n  \"timeout\": 30000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/fingerprint/register-multi",
+          "host": ["{{base_url}}"],
+          "path": ["api", "fingerprint", "register-multi"]
+        },
+        "description": "Registra una huella con múltiples muestras (3-10) para máxima precisión. Guarda template en formato .tml y capturas las mejores imágenes en BMP. Estructura: {outputPath}/{dni}/{dedo}/"
+      }
+    },
+    {
+      "name": "Verificar Identidad (1:1)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dni\": \"12345678\",\n  \"dedo\": \"indice-derecho\",\n  \"storedTemplatePath\": null,\n  \"timeout\": 20000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/fingerprint/verify-simple",
+          "host": ["{{base_url}}"],
+          "path": ["api", "fingerprint", "verify-simple"]
+        },
+        "description": "Verifica la identidad capturando automáticamente del dispositivo. Si storedTemplatePath es null, busca en: {tempPath}/{dni}/{dedo}/{dni}.tml"
+      }
+    },
+    {
+      "name": "Identificar Usuario (1:N Automático)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"templatesDirectory\": \"C:/temp/fingerprints\",\n  \"timeout\": 30000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/fingerprint/identify-live",
+          "host": ["{{base_url}}"],
+          "path": ["api", "fingerprint", "identify-live"]
+        },
+        "description": "Captura huella del dispositivo y busca coincidencia automáticamente en todos los templates del directorio. Busca recursivamente archivos .tml"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    }
+  ]
+}

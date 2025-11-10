@@ -1,0 +1,72 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>7.3</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore" Version="2.2.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.2.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc" Version="2.2.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="2.2.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Serilog.AspNetCore" Version="3.4.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="4.0.1" />
+    
+    <!-- Versiones explícitas para resolver conflictos -->
+    <PackageReference Include="System.IO.Pipelines" Version="9.0.8" />
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+    <PackageReference Include="System.Buffers" Version="4.5.1" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+    <PackageReference Include="System.Text.Encodings.Web" Version="9.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\futronic-cli\futronic-cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+ <!-- Referencia a la DLL del SDK de Futronic desde el directorio de salida del proyecto CLI -->
+    <Reference Include="ftrSDKHelper13">
+      <HintPath>..\futronic-cli\bin\x64\Debug\ftrSDKHelper13.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Constants\" />
+    <Folder Include="Helpers\" />
+    <Folder Include="Models\Internal\" />
+  </ItemGroup>
+
+  <!-- Copiar DLLs nativas de Futronic al directorio de salida -->
+  <ItemGroup>
+    <None Include="..\futronic-cli\bin\x64\Debug\FTRAPI.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>FTRAPI.dll</Link>
+  </None>
+    <None Include="..\futronic-cli\bin\x64\Debug\ftrScanAPI.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ftrScanAPI.dll</Link>
+    </None>
+  </ItemGroup>
+
+  <!-- Target para copiar DLLs después de compilar -->
+  <Target Name="CopyNativeDLLs" AfterTargets="Build">
+    <ItemGroup>
+      <NativeDLLs Include="..\futronic-cli\bin\x64\Debug\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NativeDLLs)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Message Text="Copied native DLLs from futronic-cli to $(OutputPath)" Importance="high" />
+  </Target>
+
+</Project>

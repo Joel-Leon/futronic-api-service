@@ -1,0 +1,402 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.ExceptionServices;
+using System.Security;
+using System.Threading;
+using System.Threading.Tasks;
+using Futronic.SDKHelper;
+using FutronicService.Models;
+using FutronicService.Utils;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using futronic_cli;
+
+namespace FutronicService.Services
+{
+  public class FutronicFingerprintService : IFingerprintService
+    {
+        private readonly ILogger<FutronicFingerprintService> _logger;
+        private readonly IConfiguration _configuration;
+        private DateTime _serviceStartTime;
+        private string _lastError;
+        private bool _deviceConnected;
+        private bool _sdkInitialized;
+        private readonly object _deviceLock = new object();
+
+   // Configuraciones
+      private int _threshold;
+        private int _timeout;
+        private string _tempPath;
+        private bool _overwriteExisting;
+    private int _maxTemplatesPerIdentify;
+     private int _deviceCheckRetries = 3;
+      private int _deviceCheckDelayMs = 1000;
+
+        public FutronicFingerprintService(ILogger<FutronicFingerprintService> logger, IConfiguration configuration)
+        {
+            _logger = logger;
+          _configuration = configuration;
+  _serviceStartTime = DateTime.Now;
+LoadConfiguration();
+            InitializeDevice();
+        }
+
+      private void LoadConfiguration()
+   {
+            _threshold = _configuration.GetValue<int>("Fingerprint:Threshold", 70);
+          _timeout = _configuration.GetValue<int>("Fingerprint:Timeout", 30000);
+        _tempPath = _configuration.GetValue<string>("Fingerprint:TempPath", "C:/temp/fingerprints");
+          _overwriteExisting = _configuration.GetValue<bool>("Fingerprint:OverwriteExisting", false);
+            _maxTemplatesPerIdentify = _configuration.GetValue<int>("Fingerprint:MaxTemplatesPerIdentify", 500);
+     _deviceCheckRetries = _configuration.GetValue<int>("Fingerprint:DeviceCheckRetries", 3);
+    _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
+
+      _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, Retries={_deviceCheckRetries}");
+    }
+
+        [HandleProcessCorruptedStateExceptions]
+        [SecurityCritical]
+     private void InitializeDevice()
+        {
+     lock (_deviceLock)
+    {
+   try
+            {
+         _logger.LogInformation("=== INITIALIZING FUTRONIC DEVICE ===");
+        _sdkInitialized = false;
+      _deviceConnected = false;
+
+          // PASO 1: Verificar ensamblado del SDK
+    if (!VerifySDKAssembly())
+                 {
+   _logger.LogError("SDK assembly verification failed - cannot proceed");
+     _lastError = "SDK no disponible";
+        return;
+              }
+
+               // PASO 2: Verificar DLLs nativas
+           if (!VerifyNativeDLLs())
+        {
+          _logger.LogWarning("Native DLLs verification failed - device may not work");
+                  _lastError = "DLLs nativas faltantes";
+           }
+
+   // PASO 3: Intentar inicializar SDK con reintentos
+   _sdkInitialized = InitializeSDKWithRetries();
+
+     if (_sdkInitialized)
+         {
+            // PASO 4: Verificar conexión del dispositivo
+   _deviceConnected = CheckDeviceConnectionWithRetries();
+
+              if (_deviceConnected)
+             {
+       _logger.LogInformation("? Futronic device initialized successfully");
+   _lastError = null;
+  }
+      else
+             {
+           _logger.LogWarning("? SDK initialized but device not detected");
+        _lastError = "Dispositivo no detectado";
+      }
+              }
+       else
+    {
+       _logger.LogError("? Failed to initialize SDK");
+         _lastError = "Error de inicialización del SDK";
+       }
+                }
+         catch (AccessViolationException avEx)
+       {
+         _deviceConnected = false;
+       _sdkInitialized = false;
+          _lastError = "Error crítico del SDK";
+  
+           _logger.LogCritical(avEx, "CRITICAL: AccessViolationException during device initialization");
+                    _logger.LogError("????????????????????????????????????????????????????");
+    _logger.LogError("  FUTRONIC SDK INITIALIZATION FAILURE");
+  _logger.LogError("????????????????????????????????????????????????????");
+        _logger.LogError("Causa probable: El SDK no puede inicializar el callback interno (cbControl)");
+ _logger.LogError("");
+       _logger.LogError("ACCIONES REQUERIDAS:");
+           _logger.LogError("  1. Verificar que el dispositivo Futronic esté conectado por USB");
+            _logger.LogError("  2. Reinstalar el driver de Futronic (desde el sitio oficial)");
+ _logger.LogError("  3. Copiar ftrapi.dll al directorio de la aplicación");
+         _logger.LogError("  4. Reiniciar el servicio Windows");
+            _logger.LogError("  5. Si persiste, reiniciar el sistema");
+        _logger.LogError("????????????????????????????????????????????????????");
+        }
+           catch (Exception ex)
+       {
+          _deviceConnected = false;
+      _sdkInitialized = false;
+      _lastError = ex.Message;
+              _logger.LogError(ex, "Failed to initialize Futronic device");
+            }
+          }
+        }
+
+        private bool CheckDeviceConnection()
+        {
+         try
+{
+      _logger.LogDebug("Checking device connection...");
+  
+        // La mejor manera de verificar si el dispositivo está conectado es
+        // intentar una operación real de captura con timeout muy corto
+  var done = new ManualResetEvent(false);
+        bool deviceConnected = false;
+    int deviceErrorCode = 0;
+         bool accessViolationOccurred = false;
+
+                using (var testEnrollment = new FutronicEnrollment())
+        {
+                 testEnrollment.FakeDetection = false;
+     testEnrollment.MaxModels = 1;
+
+      ReflectionHelper.TrySetProperty(testEnrollment, "MIOTOff", 500);
+   ReflectionHelper.TrySetProperty(testEnrollment, "FastMode", true);
+
+          testEnrollment.OnEnrollmentComplete += (bool success, int resultCode) =>
+     {
+           try
+        {
+          _logger.LogDebug($"Device check result: Success={success}, ResultCode={resultCode}");
+ deviceErrorCode = resultCode;
+
+            if (resultCode == 202 || resultCode == 201)
+        {
+               _logger.LogWarning($"Device NOT connected (code {resultCode})");
+       deviceConnected = false;
+               }
+    else if (resultCode == 7 || resultCode == 8 || resultCode == 4 || success)
+    {
+    _logger.LogInformation($"Device IS connected (code {resultCode})");
+   deviceConnected = true;
+         }
+        else
+         {
+      _logger.LogDebug($"Assuming device connected (code {resultCode})");
+            deviceConnected = true;
+   }
+            }
+    finally
+       {
+     done.Set();
+}
+         };
+
+      try
+         {
+         _logger.LogDebug("Starting test enrollment...");
+  testEnrollment.Enrollment();
+
+               if (!done.WaitOne(2000))
+                 {
+        _logger.LogWarning("Device check timeout (no response from SDK)");
+   return false;
+           }
+
+          if (accessViolationOccurred)
+             {
+     _logger.LogError("AccessViolationException occurred during enrollment");
+        return false;
+     }
+
+      _logger.LogInformation($"Device check completed: Connected={deviceConnected}, ErrorCode={deviceErrorCode}");
+      return deviceConnected;
+         }
+        catch (AccessViolationException avEx)
+          {
+  accessViolationOccurred = true;
+              _logger.LogError(avEx, "AccessViolationException during test enrollment");
+ _logger.LogError("This means the SDK callback (cbControl) is not initialized");
+                _logger.LogError("Possible causes:");
+            _logger.LogError("  1. Device driver not properly installed");
+         _logger.LogError("  2. ftrapi.dll version mismatch");
+          _logger.LogError("  3. Device firmware issue");
+               return false;
+          }
+      catch (Exception ex)
+       {
+               _logger.LogWarning(ex, "Exception during device check enrollment");
+return false;
+            }
+     }
+       }
+      catch (AccessViolationException avEx)
+   {
+        _logger.LogError(avEx, "AccessViolationException creating FutronicEnrollment");
+             return false;
+ }
+            catch (Exception ex)
+         {
+    _logger.LogError(ex, "Error checking device connection");
+           return false;
+            }
+        }
+
+        public bool IsDeviceConnected()
+        {
+            return _deviceConnected && _sdkInitialized;
+        }
+
+  private bool VerifySDKAssembly()
+        {
+    try
+            {
+  var sdkAssembly = typeof(FutronicEnrollment).Assembly;
+      _logger.LogInformation($"? SDK Assembly: {sdkAssembly.FullName}");
+_logger.LogInformation($"  Location: {sdkAssembly.Location}");
+         _logger.LogInformation($"  Version: {sdkAssembly.GetName().Version}");
+    return true;
+      }
+   catch (Exception ex)
+ {
+            _logger.LogError(ex, "? Failed to verify SDK assembly");
+return false;
+            }
+    }
+
+   private bool VerifyNativeDLLs()
+        {
+       try
+        {
+         var currentDir = AppDomain.CurrentDomain.BaseDirectory;
+     _logger.LogInformation($"Application directory: {currentDir}");
+
+     var dllsToCheck = new[] 
+          { 
+     "ftrapi.dll",
+     "FutronicSDK.dll",
+        "msvcr120.dll",
+     "msvcp120.dll"
+         };
+
+         bool allFound = true;
+      foreach (var dll in dllsToCheck)
+      {
+    var fullPath = Path.Combine(currentDir, dll);
+ if (File.Exists(fullPath))
+  {
+    var fileInfo = new FileInfo(fullPath);
+            _logger.LogInformation($"  ? {dll} ({fileInfo.Length:N0} bytes)");
+       }
+            else
+     {
+          _logger.LogWarning($"  ? {dll} NOT FOUND");
+             if (dll == "ftrapi.dll" || dll == "FutronicSDK.dll")
+         {
+   allFound = false;
+           }
+ }
+ }
+
+        return allFound;
+  }
+            catch (Exception ex)
+            {
+    _logger.LogError(ex, "Failed to check native DLLs");
+     return false;
+            }
+     }
+
+        [HandleProcessCorruptedStateExceptions]
+      [SecurityCritical]
+      private bool InitializeSDKWithRetries()
+        {
+            for (int attempt = 1; attempt <= _deviceCheckRetries; attempt++)
+        {
+     try
+    {
+      _logger.LogInformation($"SDK initialization attempt {attempt}/{_deviceCheckRetries}");
+
+       using (var testInstance = new FutronicEnrollment())
+    {
+         _logger.LogInformation($"  ? FutronicEnrollment instance created successfully");
+ 
+  testInstance.FakeDetection = false;
+       testInstance.MaxModels = 1;
+            
+     _logger.LogInformation($"? SDK properties accessible");
+        return true;
+         }
+            }
+catch (AccessViolationException avEx)
+                {
+      _logger.LogError(avEx, $"  ? AccessViolationException on attempt {attempt}");
+            
+                  if (attempt < _deviceCheckRetries)
+            {
+           _logger.LogInformation($"  ? Waiting {_deviceCheckDelayMs}ms before retry...");
+            Thread.Sleep(_deviceCheckDelayMs);
+       }
+          }
+   catch (Exception ex)
+         {
+        _logger.LogError(ex, $"  ? SDK initialization failed on attempt {attempt}");
+     
+         if (attempt < _deviceCheckRetries)
+         {
+           Thread.Sleep(_deviceCheckDelayMs);
+  }
+            }
+   }
+
+     _logger.LogError($"SDK initialization failed after {_deviceCheckRetries} attempts");
+            return false;
+   }
+
+        [HandleProcessCorruptedStateExceptions]
+        [SecurityCritical]
+        private bool CheckDeviceConnectionWithRetries()
+        {
+    for (int attempt = 1; attempt <= _deviceCheckRetries; attempt++)
+            {
+try
+                {
+  _logger.LogInformation($"Device connection check attempt {attempt}/{_deviceCheckRetries}");
+         
+      bool connected = CheckDeviceConnection();
+         
+  if (connected)
+      {
+     _logger.LogInformation($"  ? Device connected on attempt {attempt}");
+      return true;
+       }
+              else
+         {
+        _logger.LogWarning($"  ? Device not detected on attempt {attempt}");
+          
+       if (attempt < _deviceCheckRetries)
+            {
+ _logger.LogInformation($"  ? Waiting {_deviceCheckDelayMs}ms before retry...");
+      Thread.Sleep(_deviceCheckDelayMs);
+   }
+       }
+             }
+           catch (AccessViolationException avEx)
+                {
+ _logger.LogError(avEx, $"  ? AccessViolationException during device check attempt {attempt}");
+          
+         if (attempt < _deviceCheckRetries)
+      {
+         Thread.Sleep(_deviceCheckDelayMs * 2);
+      }
+          }
+       catch (Exception ex)
+   {
+         _logger.LogWarning(ex, $"  ? Device check failed on attempt {attempt}");
+         
+   if (attempt < _deviceCheckRetries)
+                  {
+  Thread.Sleep(_deviceCheckDelayMs);
+        }
+     }
+      }
+
+            _logger.LogWarning($"Device not connected after {_deviceCheckRetries} attempts");
+  return false;
+      }
