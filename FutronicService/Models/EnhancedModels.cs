@@ -26,6 +26,11 @@ namespace FutronicService.Models
      /// Timeout para la captura en milisegundos (opcional, usa default si no se especifica)
         /// </summary>
         public int? Timeout { get; set; }
+
+ /// <summary>
+        /// URL para enviar eventos de progreso durante la captura
+        /// </summary>
+  public string CallbackUrl { get; set; }
     }
 
     /// <summary>
@@ -57,6 +62,11 @@ namespace FutronicService.Models
      /// Timeout para cada captura en milisegundos
   /// </summary>
         public int? Timeout { get; set; }
+
+ /// <summary>
+ /// URL para enviar eventos de progreso durante la captura
+  /// </summary>
+  public string CallbackUrl { get; set; }
     }
 
     /// <summary>
