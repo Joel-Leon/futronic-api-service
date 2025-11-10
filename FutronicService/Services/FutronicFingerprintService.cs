@@ -250,7 +250,7 @@ else
 
   public async Task<ApiResponse<CaptureResponseData>> CaptureAsync(CaptureRequest request)
     {
-            return await Task.Run(() =>
+      return await Task.Run(() =>
             {
            try
    {
@@ -258,59 +258,77 @@ else
     {
      return ApiResponse<CaptureResponseData>.ErrorResponse(
 "Dispositivo no conectado o SDK no inicializado",
-               "DEVICE_NOT_CONNECTED"
+    "DEVICE_NOT_CONNECTED"
          );
         }
 
-  _logger.LogInformation("Starting fingerprint capture...");
-             Console.WriteLine($"\n{"=",-60}");
-          Console.WriteLine($"=== CAPTURA DE HUELLA (SIN REGISTRO) ===");
+  _logger.LogInformation("Starting fingerprint capture with image...");
+     Console.WriteLine($"\n{"=",-60}");
+  Console.WriteLine($"=== CAPTURA DE HUELLA (SIN REGISTRO) ===");
      Console.WriteLine($"{"=",-60}");
 
-    var captureResult = CaptureFingerprintInternal(request.Timeout);
+// Usar enrollment con 1 muestra para capturar imagen
+              var enrollResult = EnrollFingerprintInternal(1, request.Timeout);
 
-      if (captureResult == null || captureResult.Template == null)
+      if (enrollResult == null || enrollResult.Template == null)
      {
         return ApiResponse<CaptureResponseData>.ErrorResponse(
-          "Error al capturar huella",
+       "Error al capturar huella",
    "CAPTURE_FAILED"
 );
         }
 
- // Guardar template en archivo temporal formato .tml
+ // Crear estructura de carpetas para la captura
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-     string templatePath = Path.Combine(_capturePath, $"capture_{timestamp}.tml");
-    Directory.CreateDirectory(_capturePath);
+    string captureId = $"capture_{timestamp}";
+      string captureDir = Path.Combine(_capturePath, captureId);
+          string imagesDir = Path.Combine(captureDir, "images");
+     Directory.CreateDirectory(captureDir);
+       Directory.CreateDirectory(imagesDir);
 
-      // Convertir a formato .tml
-       byte[] demoTemplate = TemplateUtils.ConvertToDemo(captureResult.Template, $"capture_{timestamp}");
+              // Guardar template en formato .tml
+     string templatePath = Path.Combine(captureDir, $"{captureId}.tml");
+       byte[] demoTemplate = TemplateUtils.ConvertToDemo(enrollResult.Template, captureId);
     File.WriteAllBytes(templatePath, demoTemplate);
 
+        // Guardar imagen si fue capturada
+       string imagePath = null;
+   if (enrollResult.CapturedImages != null && enrollResult.CapturedImages.Count > 0)
+           {
+ var bestImage = enrollResult.CapturedImages.OrderByDescending(img => img.Quality).First();
+             imagePath = Path.Combine(imagesDir, $"{captureId}.bmp");
+   File.WriteAllBytes(imagePath, bestImage.ImageData);
+     
+           Console.WriteLine($"\n?? Imagen capturada:");
+     Console.WriteLine($"   ?? Calidad: {bestImage.Quality:F2}");
+        Console.WriteLine($"?? Ruta: {imagePath}");
+          }
+
   Console.WriteLine($"\n? Huella capturada y guardada (TEMPORAL)");
-    Console.WriteLine($"   ?? Archivo: {Path.GetFileName(templatePath)}");
-  Console.WriteLine($"   ?? Ruta: {templatePath}");
+    Console.WriteLine($"   ?? Template: {Path.GetFileName(templatePath)}");
+  Console.WriteLine($"   ?? Directorio: {captureDir}");
  Console.WriteLine($"   ?? Tamaño: {demoTemplate.Length} bytes");
         Console.WriteLine($"   ??  Esta captura es temporal y no está asociada a ningún DNI\n");
 
-             var responseData = new CaptureResponseData
-          {
+     var responseData = new CaptureResponseData
+       {
    TemplatePath = templatePath,
-        ImagePath = null,
-   Quality = captureResult.Quality,
+        ImagePath = imagePath,
+   Quality = enrollResult.Quality,
 Timestamp = DateTime.Now.ToString("o")
-         };
+     };
 
        return ApiResponse<CaptureResponseData>.SuccessResponse("Huella capturada exitosamente", responseData);
       }
     catch (Exception ex)
-          {
+ {
    _logger.LogError(ex, "Error in CaptureAsync");
 Console.WriteLine($"? Error: {ex.Message}");
-             return ApiResponse<CaptureResponseData>.ErrorResponse(
+     return ApiResponse<CaptureResponseData>.ErrorResponse(
      ex.Message,
                  "CAPTURE_ERROR"
          );
-             }
+    }
 });
         }
 

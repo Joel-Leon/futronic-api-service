@@ -57,10 +57,16 @@ Repositorio: https://github.com/Joel-Leon/futronic-api-service
 **Estructura de Carpetas**:
 ```
 C:/temp/fingerprints/
-    captures/              ? Capturas temporales (SIN DNI)
-        capture_20250115_143022.tml
-      capture_20250115_143155.tml
-    12345678/              ? Registros permanentes (CON DNI)
+    captures/       ? Capturas temporales (SIN DNI)
+    capture_20250115_143022/
+capture_20250115_143022.tml
+     images/
+       capture_20250115_143022.bmp  ?
+      capture_20250115_143155/
+          capture_20250115_143155.tml
+   images/
+    capture_20250115_143155.bmp
+    12345678/        ? Registros permanentes (CON DNI)
         indice-derecho/
          12345678.tml
         metadata.json
@@ -73,6 +79,18 @@ images/
 POST /api/fingerprint/capture
 {
   "timeout": 30000
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "templatePath": "C:/temp/fingerprints/captures/capture_20250115_143022/capture_20250115_143022.tml",
+    "imagePath": "C:/temp/fingerprints/captures/capture_20250115_143022/images/capture_20250115_143022.bmp",
+    "quality": 88.5
+  }
 }
 ```
 

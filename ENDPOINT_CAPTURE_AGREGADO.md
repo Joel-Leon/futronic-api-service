@@ -83,15 +83,20 @@ C:/temp/fingerprints/
 ### Ahora:
 ```
 C:/temp/fingerprints/
-    captures/      ? Carpeta separada
-        capture_20250115_143022.tml
-        capture_20250115_143155.tml
-        capture_20250115_143301.tml
+  captures/ ? Carpeta separada
+capture_20250115_143022/
+   capture_20250115_143022.tml
+            images/
+     capture_20250115_143022.bmp  ? IMAGEN INCLUIDA
+        capture_20250115_143155/
+capture_20250115_143155.tml
+            images/
+       capture_20250115_143155.bmp
     12345678/   ? Registros permanentes
         indice-derecho/
             12345678.tml
-            metadata.json
-     images/
+   metadata.json
+   images/
         12345678_best_01.bmp
 ```
 
@@ -126,9 +131,9 @@ Content-Type: application/json
   "success": true,
   "message": "Huella capturada exitosamente",
   "data": {
-    "templatePath": "C:/temp/fingerprints/captures/capture_20250115_143022.tml",
-  "imagePath": null,
-    "quality": 88.5,
+    "templatePath": "C:/temp/fingerprints/captures/capture_20250115_143022/capture_20250115_143022.tml",
+    "imagePath": "C:/temp/fingerprints/captures/capture_20250115_143022/images/capture_20250115_143022.bmp",
+  "quality": 88.5,
     "timestamp": "2025-01-15T14:30:22.1234567-05:00"
   }
 }
@@ -141,13 +146,19 @@ Content-Type: application/json
 ?? Apoye el dedo sobre el sensor cuando se indique
 ? Apoye el dedo firmemente sobre el sensor
   ?? Mantenga presión constante
+   ?? Imagen capturada - Muestra: 1, Calidad: 88.45
 ? ?? Procesando huella...
 ? ¡Captura exitosa!
-   ?? Template: 1024 bytes
+ ?? Template: 1024 bytes
+   ?? Total de imágenes: 1
+
+?? Imagen capturada:
+   ?? Calidad: 88.45
+   ?? Ruta: C:/temp/fingerprints/captures/capture_20250115_143022/images/capture_20250115_143022.bmp
 
 ? Huella capturada y guardada (TEMPORAL)
-   ?? Archivo: capture_20250115_143022.tml
-   ?? Ruta: C:/temp/fingerprints/captures/capture_20250115_143022.tml
+   ?? Template: capture_20250115_143022.tml
+ ?? Directorio: C:/temp/fingerprints/captures/capture_20250115_143022
    ?? Tamaño: 1044 bytes
    ??  Esta captura es temporal y no está asociada a ningún DNI
 ```
@@ -160,12 +171,13 @@ Content-Type: application/json
 |---------|------------|-------------------|
 | **Requiere DNI** | ? No | ? Sí |
 | **Requiere Dedo** | ? No | ? Sí |
-| **Muestras** | 1 captura simple | 3-10 muestras |
-| **Carpeta** | `CapturePath/` | `TempPath/{dni}/{dedo}/` |
-| **Imágenes BMP** | ? No guarda | ? Guarda mejores 1-3 |
+| **Muestras** | 1 captura | 3-10 muestras |
+| **Carpeta** | `CapturePath/{captureId}/` | `TempPath/{dni}/{dedo}/` |
+| **Imágenes BMP** | ? Sí (1 imagen) ? | ? Sí (mejores 1-3) |
 | **Metadatos JSON** | ? No | ? Sí |
 | **Propósito** | Testing rápido | Registro permanente |
 | **Uso en producción** | ? No recomendado | ? Recomendado |
+| **Estructura** | `{captureId}/{captureId}.tml + images/` | `{dni}/{dedo}/{dni}.tml + images/` |
 
 ---
 
