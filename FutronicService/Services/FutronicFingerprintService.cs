@@ -34,6 +34,7 @@ namespace FutronicService.Services
         private int _maxTemplatesPerIdentify;
         private int _deviceCheckRetries = 3;
         private int _deviceCheckDelayMs = 1000;
+        private int _maxRotation = 199; // Valor más restrictivo (166 por defecto en SDK, 199 más estricto)
 
    public FutronicFingerprintService(ILogger<FutronicFingerprintService> logger, IConfiguration configuration)
         {
@@ -52,9 +53,10 @@ namespace FutronicService.Services
       _overwriteExisting = _configuration.GetValue<bool>("Fingerprint:OverwriteExisting", false);
    _maxTemplatesPerIdentify = _configuration.GetValue<int>("Fingerprint:MaxTemplatesPerIdentify", 500);
         _deviceCheckRetries = _configuration.GetValue<int>("Fingerprint:DeviceCheckRetries", 3);
-            _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
+         _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
+    _maxRotation = _configuration.GetValue<int>("Fingerprint:MaxRotation", 199); // 199 es más restrictivo, 166 es el default del SDK
 
-        _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, Retries={_deviceCheckRetries}");
+     _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, MaxRotation={_maxRotation}, Retries={_deviceCheckRetries}");
         }
 
      [HandleProcessCorruptedStateExceptions]
@@ -381,7 +383,8 @@ return await Task.Run(() =>
          Threshold = _threshold,
           Timeout = _timeout,
           TempPath = _tempPath,
-         OverwriteExisting = _overwriteExisting
+         OverwriteExisting = _overwriteExisting,
+    MaxRotation = _maxRotation
     };
 
          return ApiResponse<ConfigResponseData>.SuccessResponse("Configuración obtenida", config);
@@ -412,7 +415,10 @@ return await Task.Run(() =>
    if (request.OverwriteExisting.HasValue)
          _overwriteExisting = request.OverwriteExisting.Value;
 
-        _logger.LogInformation("Configuration updated successfully");
+    if (request.MaxRotation.HasValue)
+        _maxRotation = request.MaxRotation.Value;
+
+    _logger.LogInformation("Configuration updated successfully");
 
       return GetConfig();
             }
@@ -1135,7 +1141,8 @@ if (success && resultCode == 0)
      ReflectionHelper.TrySetProperty(verification, "MIOTOff", 3000);
    ReflectionHelper.TrySetProperty(verification, "DetectCore", true);
        ReflectionHelper.TrySetProperty(verification, "Version", 0x02030000);
-             ReflectionHelper.TrySetProperty(verification, "ImageQuality", 30);
+     ReflectionHelper.TrySetProperty(verification, "ImageQuality", 30);
+        ReflectionHelper.TrySetProperty(verification, "MaxRotation", _maxRotation); // Control de rotación máxima (más restrictivo)
 
      verification.OnVerificationComplete += (bool success, int resultCode, bool verificationSuccess) =>
        {

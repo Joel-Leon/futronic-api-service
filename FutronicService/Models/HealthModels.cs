@@ -9,7 +9,7 @@ namespace FutronicService.Models
         public string SdkVersion { get; set; }
         public string Uptime { get; set; }
         public string LastError { get; set; }
- }
+    }
 
     public class ConfigResponseData
     {
@@ -17,6 +17,7 @@ namespace FutronicService.Models
         public int Timeout { get; set; }
         public string TempPath { get; set; }
         public bool OverwriteExisting { get; set; }
+        public int MaxRotation { get; set; }
     }
 
     public class UpdateConfigRequest
@@ -25,5 +26,6 @@ namespace FutronicService.Models
         public int? Timeout { get; set; }
         public string TempPath { get; set; }
         public bool? OverwriteExisting { get; set; }
+        public int? MaxRotation { get; set; }
     }
 }
