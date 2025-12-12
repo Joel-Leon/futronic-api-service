@@ -564,61 +564,65 @@ Console.WriteLine($"\n{"=",-60}");
             {
     try
                 {
- if (!IsDeviceConnected())
-    {
-  return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
-      "Dispositivo no conectado",
-    "DEVICE_NOT_CONNECTED"
-         );
-         }
+                    if (!IsDeviceConnected())
+                    {
+                        return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
+                            "Dispositivo no conectado",
+                            "DEVICE_NOT_CONNECTED"
+                        );
+                    }
 
- int sampleCount = Math.Min(request.SampleCount ?? 5, 10);
-         _logger.LogInformation($"Starting multi-sample registration for DNI: {request.Dni} with {sampleCount} samples");
-     Console.WriteLine($"\n{"=",-60}");
-    Console.WriteLine($"=== REGISTRO DE HUELLA ===");
-  Console.WriteLine($"{"=",-60}");
-           Console.WriteLine($"?? DNI: {request.Dni}");
-      Console.WriteLine($"?? Dedo: {request.Dedo ?? "index"}");
-      Console.WriteLine($"?? Muestras: {sampleCount}");
+                    // ? VERIFICAR PRIMERO SI YA EXISTE LA HUELLA (antes de capturar)
+                    string outputPath = request.OutputPath ?? _tempPath;
+                    string dedo = request.Dedo ?? "index";
+                    string registrationDir = Path.Combine(outputPath, request.Dni, dedo);
+                    string templatePath = Path.Combine(registrationDir, $"{request.Dni}.tml");
 
-                // ? Notificar inicio de operación por SignalR
-                await _progressNotification.NotifyStartAsync(request.Dni, "registro de huella");
+                    if (File.Exists(templatePath) && !_overwriteExisting)
+                    {
+                        _logger.LogWarning($"Template already exists for DNI: {request.Dni}, finger: {dedo}");
+                        Console.WriteLine($"\n?? Ya existe una huella registrada para DNI {request.Dni} dedo {dedo}");
+                        Console.WriteLine($"   ?? Archivo: {templatePath}");
+                        Console.WriteLine($"   ?? Use la opción 'overwriteExisting' para sobrescribir\n");
+                        
+                        return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
+                            $"Ya existe una huella registrada para DNI {request.Dni} y dedo {dedo}. Use 'overwriteExisting' para sobrescribir.",
+                            "FILE_EXISTS"
+                        );
+                    }
 
-                // Usar FutronicEnrollment para crear un template de múltiples muestras con SignalR
-                var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _timeout, request.Dni);
-                if (enrollResult == null || enrollResult.Template == null)
-                {
-                    return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
-                        "Error al registrar huella con múltiples muestras",
-                        "ENROLLMENT_FAILED"
-                    );
-                }
+                    int sampleCount = Math.Min(request.SampleCount ?? 5, 10);
+                    _logger.LogInformation($"Starting multi-sample registration for DNI: {request.Dni} with {sampleCount} samples");
+                    Console.WriteLine($"\n{"=",-60}");
+                    Console.WriteLine($"=== REGISTRO DE HUELLA ===");
+                    Console.WriteLine($"{"=",-60}");
+                    Console.WriteLine($"?? DNI: {request.Dni}");
+                    Console.WriteLine($"?? Dedo: {request.Dedo ?? "index"}");
+                    Console.WriteLine($"?? Muestras: {sampleCount}");
 
-        // Estructura de carpetas: {outputPath}/{dni}/{dedo}/
-    string outputPath = request.OutputPath ?? _tempPath;
-     string dedo = request.Dedo ?? "index";
-     string registrationDir = Path.Combine(outputPath, request.Dni, dedo);
- string imagesDir = Path.Combine(registrationDir, "images");
+                    // ? Notificar inicio de operación por SignalR
+                    await _progressNotification.NotifyStartAsync(request.Dni, "registro de huella");
 
-             // Crear directorios
-      Directory.CreateDirectory(registrationDir);
+                    // Usar FutronicEnrollment para crear un template de múltiples muestras con SignalR
+                    var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _timeout, request.Dni);
+                    if (enrollResult == null || enrollResult.Template == null)
+                    {
+                        return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
+                            "Error al registrar huella con múltiples muestras",
+                            "ENROLLMENT_FAILED"
+                        );
+                    }
+
+                    // Crear directorios
+                    string imagesDir = Path.Combine(registrationDir, "images");
+                    Directory.CreateDirectory(registrationDir);
                     Directory.CreateDirectory(imagesDir);
 
-      // Guardar template en formato .tml
-             string templatePath = Path.Combine(registrationDir, $"{request.Dni}.tml");
-               byte[] demoTemplate = TemplateUtils.ConvertToDemo(enrollResult.Template, request.Dni);
-
-if (File.Exists(templatePath) && !_overwriteExisting)
-       {
-            return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
-             $"Ya existe una huella registrada para DNI {request.Dni} dedo {dedo}",
-         "FILE_EXISTS"
-             );
- }
-
-             File.WriteAllBytes(templatePath, demoTemplate);
-           _logger.LogInformation($"? Template guardado: {templatePath}");
-                  Console.WriteLine($"\n? Template guardado: {templatePath}");
+                    // Guardar template en formato .tml
+                    byte[] demoTemplate = TemplateUtils.ConvertToDemo(enrollResult.Template, request.Dni);
+                    File.WriteAllBytes(templatePath, demoTemplate);
+                    _logger.LogInformation($"? Template guardado: {templatePath}");
+                    Console.WriteLine($"\n? Template guardado: {templatePath}");
 
        // Seleccionar y guardar las mejores imágenes
     var selectedImages = ImageUtils.SelectBestImages(enrollResult.CapturedImages, sampleCount);

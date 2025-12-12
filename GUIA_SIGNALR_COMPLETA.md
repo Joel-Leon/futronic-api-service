@@ -9,12 +9,73 @@ Esta guía te muestra cómo implementar las notificaciones SignalR en tu frontend 
 ## ? **Cambios Realizados en el Backend**
 
 El backend ahora envía automáticamente:
+- ? **Verificación temprana de duplicados** - Verifica ANTES de capturar si ya existe la huella
 - ? **Notificación de inicio** cuando comienza el registro
 - ? **Notificación por cada muestra** que se captura
 - ? **Imagen en Base64** de cada huella capturada
 - ? **Calidad de cada muestra** (0-100)
 - ? **Progreso** del proceso (porcentaje)
 - ? **Notificación de finalización** con resumen
+
+---
+
+## ?? **Flujo de Registro Mejorado**
+
+### **Antes (? Ineficiente)**
+```
+1. Iniciar captura de huellas (5 muestras)
+2. Usuario coloca el dedo 5 veces
+3. Procesar template
+4. ? Verificar si ya existe -> ERROR después de 2-3 minutos
+```
+
+### **Ahora (? Optimizado)**
+```
+1. ? Verificar si ya existe la huella (< 1ms)
+   ?? Si existe -> Error inmediato con mensaje claro
+   ?? Si no existe -> Continuar
+2. Iniciar captura de huellas (5 muestras)
+3. Usuario coloca el dedo 5 veces
+4. Procesar template
+5. Guardar archivo
+```
+
+---
+
+## ?? **Mensajes de Error**
+
+### **Huella Ya Existente**
+
+```json
+{
+  "success": false,
+  "error": "FILE_EXISTS",
+  "message": "Ya existe una huella registrada para DNI 12345678 y dedo indice-derecho. Use 'overwriteExisting' para sobrescribir.",
+  "data": null
+}
+```
+
+**En la consola del backend:**
+```
+?? Ya existe una huella registrada para DNI 12345678 dedo indice-derecho
+   ?? Archivo: C:/temp/fingerprints/12345678/indice-derecho/12345678.tml
+   ?? Use la opción 'overwriteExisting' para sobrescribir
+```
+
+### **Sobrescribir Huella Existente**
+
+Para permitir sobrescribir una huella existente, envía:
+
+```json
+{
+  "dni": "12345678",
+  "dedo": "indice-derecho",
+  "sampleCount": 5,
+  "overwriteExisting": true  // ? Permite sobrescribir
+}
+```
+
+?? **Nota**: El parámetro `overwriteExisting` se configura en el backend (archivo `appsettings.json`), no en la petición HTTP.
 
 ---
 
@@ -51,7 +112,7 @@ export const API_CONFIG = {
 };
 ```
 
-### **2. Clase de Gestión de Registro con SignalR**
+### **2. Clase de Gestión de Registro con SignalR (Mejorada)**
 
 ```javascript
 // fingerprint-registration.js
@@ -159,6 +220,7 @@ export class FingerprintRegistration {
       await this.subscribe(dni);
 
       // 3. Iniciar registro en el backend
+      // ? El backend verificará automáticamente si ya existe antes de capturar
       const response = await fetch(`${API_CONFIG.baseURL}${API_CONFIG.endpoints.register}`, {
         method: 'POST',
         headers: {
@@ -178,6 +240,11 @@ export class FingerprintRegistration {
 
       // 4. Desconectar SignalR
       await this.disconnect();
+
+      // ? Manejar error de huella duplicada
+      if (!result.success && result.error === 'FILE_EXISTS') {
+        throw new Error(`Ya existe una huella registrada para ${dni}. ${result.message}`);
+      }
 
       return result;
 
@@ -531,12 +598,33 @@ document.getElementById('btnRegister').addEventListener('click', async () => {
       alert(`? Huella registrada exitosamente para ${dni}`);
     } else {
       console.error('? Error en registro:', result);
-      alert(`? Error: ${result.message}`);
+      
+      // ? Manejo específico para huella duplicada
+      if (result.error === 'FILE_EXISTS') {
+        const confirmar = confirm(
+          `?? ${result.message}\n\n¿Desea sobrescribir la huella existente?`
+        );
+        
+        if (confirmar) {
+          // Aquí podrías llamar a un endpoint especial para sobrescribir
+          // O mostrar un mensaje indicando cómo configurar el backend
+          alert('?? Para sobrescribir, configure "OverwriteExisting: true" en el servidor');
+        }
+      } else {
+        alert(`? Error: ${result.message}`);
+      }
     }
 
   } catch (error) {
     console.error('? Error:', error);
-    alert(`? Error: ${error.message}`);
+    
+    // ? Mostrar mensaje amigable para duplicados
+    if (error.message.includes('Ya existe una huella')) {
+      alert(`?? ${error.message}`);
+    } else {
+      alert(`? Error: ${error.message}`);
+    }
+    
   } finally {
     // Habilitar botón
     document.getElementById('btnRegister').disabled = false;
@@ -855,6 +943,7 @@ button:disabled {
 - [ ] Suscribirse al DNI usando `SubscribeToDni`
 - [ ] Escuchar evento `ReceiveProgress`
 - [ ] Implementar handlers para cada tipo de evento
+- [ ] ? **Manejar error `FILE_EXISTS` para duplicados**
 - [ ] Mostrar imágenes en Base64 recibidas
 - [ ] Mostrar barras de calidad
 - [ ] Mostrar resumen final
@@ -865,7 +954,7 @@ button:disabled {
 ## ?? **Ejemplo de Uso Completo**
 
 ```javascript
-// Ejemplo de uso
+// Ejemplo de uso con manejo de duplicados
 const registration = new FingerprintRegistration();
 
 async function iniciarRegistro() {
@@ -877,11 +966,21 @@ async function iniciarRegistro() {
       sampleCount: 5
     });
     
-    console.log('? Registro completado:', result);
-    console.log('?? Imágenes capturadas:', registration.samples.length);
+    if (result.success) {
+      console.log('? Registro completado:', result);
+      console.log('?? Imágenes capturadas:', registration.samples.length);
+    } else if (result.error === 'FILE_EXISTS') {
+      console.warn('?? Huella ya existe:', result.message);
+      // Mostrar UI para confirmar sobrescritura
+    }
     
   } catch (error) {
     console.error('? Error:', error);
+    
+    if (error.message.includes('Ya existe')) {
+      // Mostrar mensaje específico para duplicados
+      alert('?? Esta huella ya está registrada');
+    }
   }
 }
 
@@ -891,5 +990,9 @@ iniciarRegistro();
 ---
 
 **?? Última Actualización:** 2025-01-24  
-**?? Versión:** 3.2  
-**? Estado:** Producción Ready con SignalR e Imágenes en Tiempo Real
+**?? Versión:** 3.3  
+**? Estado:** Producción Ready con Verificación Temprana de Duplicados  
+**?? Cambios Recientes:**  
+  - ? Verificación de duplicados ANTES de capturar (ahorra tiempo al usuario)  
+  - ? Mensajes de error más claros y descriptivos  
+  - ? Mejor manejo de errores en el frontend
