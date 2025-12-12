@@ -581,12 +581,15 @@ Console.WriteLine($"\n{"=",-60}");
                     if (File.Exists(templatePath) && !_overwriteExisting)
                     {
                         _logger.LogWarning($"Template already exists for DNI: {request.Dni}, finger: {dedo}");
+                        _logger.LogInformation($"Template path: {templatePath}");
+                        
                         Console.WriteLine($"\n?? Ya existe una huella registrada para DNI {request.Dni} dedo {dedo}");
                         Console.WriteLine($"   ?? Archivo: {templatePath}");
                         Console.WriteLine($"   ?? Use la opción 'overwriteExisting' para sobrescribir\n");
                         
+                        // ? Mensaje simplificado para el frontend (sin detalles técnicos)
                         return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
-                            $"Ya existe una huella registrada para DNI {request.Dni} y dedo {dedo}. Use 'overwriteExisting' para sobrescribir.",
+                            $"Ya existe una huella registrada para este DNI y dedo",
                             "FILE_EXISTS"
                         );
                     }
@@ -997,16 +1000,16 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                         ReflectionHelper.TrySetProperty(enrollment, "DetectCore", true);
                         ReflectionHelper.TrySetProperty(enrollment, "ImageQuality", 50);
 
-                        // Configurar captura de imágenes pasando DNI y maxModels
-                        ConfigureImageCapture(enrollment, capturedImages, currentSample, maxModels, dni);
+                        // Configurar captura de imágenes pasando función para obtener currentSample actualizado
+                        ConfigureImageCapture(enrollment, capturedImages, () => currentSample, maxModels, dni);
 
                         // Eventos de progreso
                         enrollment.OnPutOn += (FTR_PROGRESS p) =>
                         {
                             currentSample++;
-                            _logger.LogInformation($"?? Muestra {currentSample}/{maxModels}");
-                            Console.WriteLine($"?? Muestra {currentSample}/{maxModels}: Apoye el dedo firmemente.");
-                            Console.WriteLine("  ?? Consejo: Mantenga presión constante para mejor calidad");
+                            _logger.LogInformation($"Muestra {currentSample}/{maxModels}");
+                            Console.WriteLine($"Muestra {currentSample}/{maxModels}: Apoye el dedo firmemente.");
+                            Console.WriteLine("  Consejo: Mantenga presión constante para mejor calidad");
                             
                             // ? Notificar inicio de captura de muestra por SignalR
                             if (!string.IsNullOrEmpty(dni))
@@ -1019,14 +1022,14 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                         {
                             if (currentSample < maxModels)
                             {
-                                _logger.LogInformation($"? Muestra {currentSample} capturada");
-                                Console.WriteLine($"? ? Muestra {currentSample} capturada. Retire el dedo completamente.");
-                                Console.WriteLine("  ?? Para la siguiente: varíe ligeramente rotación y presión");
+                                _logger.LogInformation($"Muestra {currentSample} capturada");
+                                Console.WriteLine($"Muestra {currentSample} capturada. Retire el dedo completamente.");
+                                Console.WriteLine("  Para la siguiente: varíe ligeramente rotación y presión");
                             }
                             else
                             {
                                 _logger.LogInformation("Procesando template final...");
-                                Console.WriteLine("?? ?? Procesando template final...");
+                                Console.WriteLine("Procesando template final...");
                             }
                         };
 
@@ -1140,15 +1143,15 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
             }
         }
 
-        private void ConfigureImageCapture(FutronicEnrollment enrollment, List<CapturedImage> capturedImages, int currentSample, int maxModels, string dni = null)
+        private void ConfigureImageCapture(FutronicEnrollment enrollment, List<CapturedImage> capturedImages, Func<int> getCurrentSample, int maxModels, string dni = null)
         {
             try
             {
                 var eventInfo = enrollment.GetType().GetEvent("UpdateScreenImage");
                 if (eventInfo != null)
                 {
-                    _logger.LogInformation("?? Sistema de captura de imágenes activado");
-                    Console.WriteLine("?? Sistema de captura de imágenes activado\n");
+                    _logger.LogInformation("Sistema de captura de imágenes activado");
+                    Console.WriteLine("Sistema de captura de imágenes activado\n");
 
                     Action<object> imageHandler = (bitmap) =>
                     {
@@ -1160,6 +1163,7 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                                 if (imageData != null && imageData.Length > 0)
                                 {
                                     double quality = ImageUtils.CalculateImageQuality(imageData);
+                                    int currentSample = getCurrentSample(); // ? Obtener valor actualizado
 
                                     var capturedImage = new CapturedImage
                                     {
@@ -1170,7 +1174,7 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                                     };
 
                                     capturedImages.Add(capturedImage);
-                                    Console.WriteLine($"   ?? Imagen capturada - Muestra: {currentSample}, Calidad: {quality:F2}");
+                                    Console.WriteLine($"   Imagen capturada - Muestra: {currentSample}, Calidad: {quality:F2}");
                                     
                                     // ? Notificar imagen capturada por SignalR con Base64
                                     if (!string.IsNullOrEmpty(dni))
@@ -1183,7 +1187,7 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                                             imageData  // ? Enviar imagen en Base64
                                         ).Wait();
                                         
-                                        _logger.LogInformation($"?? Notificación SignalR enviada: Muestra {currentSample}/{maxModels}, Calidad: {quality:F2}, Imagen: {imageData.Length} bytes");
+                                        _logger.LogInformation($"Notificación SignalR enviada: Muestra {currentSample}/{maxModels}, Calidad: {quality:F2}, Imagen: {imageData.Length} bytes");
                                     }
                                 }
                             }
@@ -1200,7 +1204,7 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
                 }
                 else
                 {
-                    _logger.LogWarning("?? Captura de imágenes no disponible");
+                    _logger.LogWarning("Captura de imágenes no disponible");
                 }
             }
             catch (Exception ex)

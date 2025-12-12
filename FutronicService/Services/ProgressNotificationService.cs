@@ -132,7 +132,7 @@ namespace FutronicService.Services
 
             await NotifyAsync(
                 eventType: "sample_captured",
-                message: $"? Muestra {currentSample}/{totalSamples} capturada - Calidad: {quality:F2}",
+                message: $"Muestra {currentSample}/{totalSamples} capturada - Calidad: {quality:F2}",
                 data: dataObj,
                 dni: dni,
                 callbackUrl: callbackUrl
