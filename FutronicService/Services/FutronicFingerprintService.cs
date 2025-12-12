@@ -20,29 +20,34 @@ namespace FutronicService.Services
     {
         private readonly ILogger<FutronicFingerprintService> _logger;
         private readonly IConfiguration _configuration;
-     private DateTime _serviceStartTime;
+        private readonly IProgressNotificationService _progressNotification;
+        private DateTime _serviceStartTime;
         private string _lastError;
         private bool _deviceConnected;
         private bool _sdkInitialized;
- private readonly object _deviceLock = new object();
+        private readonly object _deviceLock = new object();
 
         // Configuraciones
-  private int _threshold;
+        private int _threshold;
         private int _timeout;
-     private string _tempPath;
+        private string _tempPath;
         private string _capturePath;
-   private bool _overwriteExisting;
-  private int _maxTemplatesPerIdentify;
-    private int _deviceCheckRetries = 3;
+        private bool _overwriteExisting;
+        private int _maxTemplatesPerIdentify;
+        private int _deviceCheckRetries = 3;
         private int _deviceCheckDelayMs = 1000;
         private int _maxRotation = 199; // Valor más restrictivo (166 por defecto en SDK, 199 más estricto)
 
-   public FutronicFingerprintService(ILogger<FutronicFingerprintService> logger, IConfiguration configuration)
+        public FutronicFingerprintService(
+            ILogger<FutronicFingerprintService> logger, 
+            IConfiguration configuration,
+            IProgressNotificationService progressNotification)
         {
-       _logger = logger;
-     _configuration = configuration;
-     _serviceStartTime = DateTime.Now;
-   LoadConfiguration();
+            _logger = logger;
+            _configuration = configuration;
+            _progressNotification = progressNotification;
+            _serviceStartTime = DateTime.Now;
+            LoadConfiguration();
             InitializeDevice();
         }
 
@@ -555,7 +560,7 @@ Console.WriteLine($"\n{"=",-60}");
 
         public async Task<ApiResponse<RegisterMultiSampleResponseData>> RegisterMultiSampleAsync(RegisterMultiSampleRequest request)
   {
-       return await Task.Run(() =>
+       return await Task.Run(async () =>
             {
     try
                 {
@@ -576,15 +581,18 @@ Console.WriteLine($"\n{"=",-60}");
       Console.WriteLine($"?? Dedo: {request.Dedo ?? "index"}");
       Console.WriteLine($"?? Muestras: {sampleCount}");
 
-           // Usar FutronicEnrollment para crear un template de múltiples muestras
-         var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _timeout);
-     if (enrollResult == null || enrollResult.Template == null)
-      {
-       return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
-           "Error al registrar huella con múltiples muestras",
-                  "ENROLLMENT_FAILED"
-   );
-         }
+                // ? Notificar inicio de operación por SignalR
+                await _progressNotification.NotifyStartAsync(request.Dni, "registro de huella");
+
+                // Usar FutronicEnrollment para crear un template de múltiples muestras con SignalR
+                var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _timeout, request.Dni);
+                if (enrollResult == null || enrollResult.Template == null)
+                {
+                    return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
+                        "Error al registrar huella con múltiples muestras",
+                        "ENROLLMENT_FAILED"
+                    );
+                }
 
         // Estructura de carpetas: {outputPath}/{dni}/{dedo}/
     string outputPath = request.OutputPath ?? _tempPath;
@@ -843,10 +851,10 @@ Threshold = _threshold,
        {
       _logger.LogError(ex, "Error in IdentifyLiveAsync");
            Console.WriteLine($"? Error: {ex.Message}");
-return ApiResponse<IdentifyLiveResponseData>.ErrorResponse(
-       ex.Message,
-   "IDENTIFICATION_ERROR"
-          );
+                return ApiResponse<IdentifyLiveResponseData>.ErrorResponse(
+                    ex.Message,
+                    "IDENTIFICATION_ERROR"
+                );
      }
        });
         }
@@ -952,194 +960,249 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
             }
         }
 
-        private EnrollResult EnrollFingerprintInternal(int maxModels, int timeout)
+        private EnrollResult EnrollFingerprintInternal(int maxModels, int timeout, string dni = null)
         {
-       lock (_deviceLock)
-{
-       try
+            lock (_deviceLock)
             {
-      _logger.LogInformation($"?? Iniciando registro con {maxModels} muestras...");
- Console.WriteLine($"\n{"=",-60}");
-         Console.WriteLine($"=== CAPTURA INTELIGENTE DE HUELLA ===");
-    Console.WriteLine($"{"=",-60}");
-          Console.WriteLine($"?? Muestras objetivo: {maxModels}");
-               Console.WriteLine($"?? Siga las instrucciones en pantalla\n");
+                try
+                {
+                    _logger.LogInformation($"?? Iniciando registro con {maxModels} muestras...");
+                    Console.WriteLine($"\n{"=",-60}");
+                    Console.WriteLine($"=== CAPTURA INTELIGENTE DE HUELLA ===");
+                    Console.WriteLine($"{"=",-60}");
+                    Console.WriteLine($"?? Muestras objetivo: {maxModels}");
+                    Console.WriteLine($"?? Siga las instrucciones en pantalla\n");
 
-      var enrollResult = new EnrollResult();
-        var done = new ManualResetEvent(false);
-           var capturedImages = new List<CapturedImage>();
-    int currentSample = 0;
+                    var enrollResult = new EnrollResult();
+                    var done = new ManualResetEvent(false);
+                    var capturedImages = new List<CapturedImage>();
+                    int currentSample = 0;
 
-   using (var enrollment = new FutronicEnrollment())
-              {
-       enrollment.FakeDetection = false;
-      enrollment.MaxModels = maxModels;
+                    using (var enrollment = new FutronicEnrollment())
+                    {
+                        enrollment.FakeDetection = false;
+                        enrollment.MaxModels = maxModels;
 
-            // Configuraciones optimizadas del SDK
-        ReflectionHelper.TrySetProperty(enrollment, "FastMode", false);
- ReflectionHelper.TrySetProperty(enrollment, "FFDControl", true);
-        ReflectionHelper.TrySetProperty(enrollment, "FARN", _threshold);
-      ReflectionHelper.TrySetProperty(enrollment, "Version", 0x02030000);
-         ReflectionHelper.TrySetProperty(enrollment, "DetectFakeFinger", false);
-         ReflectionHelper.TrySetProperty(enrollment, "MIOTOff", 2000);
-        ReflectionHelper.TrySetProperty(enrollment, "DetectCore", true);
-   ReflectionHelper.TrySetProperty(enrollment, "ImageQuality", 50);
+                        // Configuraciones optimizadas del SDK
+                        ReflectionHelper.TrySetProperty(enrollment, "FastMode", false);
+                        ReflectionHelper.TrySetProperty(enrollment, "FFDControl", true);
+                        ReflectionHelper.TrySetProperty(enrollment, "FARN", _threshold);
+                        ReflectionHelper.TrySetProperty(enrollment, "Version", 0x02030000);
+                        ReflectionHelper.TrySetProperty(enrollment, "DetectFakeFinger", false);
+                        ReflectionHelper.TrySetProperty(enrollment, "MIOTOff", 2000);
+                        ReflectionHelper.TrySetProperty(enrollment, "DetectCore", true);
+                        ReflectionHelper.TrySetProperty(enrollment, "ImageQuality", 50);
 
-      // Configurar captura de imágenes
-            ConfigureImageCapture(enrollment, capturedImages, currentSample);
+                        // Configurar captura de imágenes pasando DNI y maxModels
+                        ConfigureImageCapture(enrollment, capturedImages, currentSample, maxModels, dni);
 
-        // Eventos de progreso
-               enrollment.OnPutOn += (FTR_PROGRESS p) =>
-            {
-            currentSample++;
-   _logger.LogInformation($"? Muestra {currentSample}/{maxModels}");
-        Console.WriteLine($"? Muestra {currentSample}/{maxModels}: Apoye el dedo firmemente.");
-          Console.WriteLine("  ?? Consejo: Mantenga presión constante para mejor calidad");
-         };
+                        // Eventos de progreso
+                        enrollment.OnPutOn += (FTR_PROGRESS p) =>
+                        {
+                            currentSample++;
+                            _logger.LogInformation($"?? Muestra {currentSample}/{maxModels}");
+                            Console.WriteLine($"?? Muestra {currentSample}/{maxModels}: Apoye el dedo firmemente.");
+                            Console.WriteLine("  ?? Consejo: Mantenga presión constante para mejor calidad");
+                            
+                            // ? Notificar inicio de captura de muestra por SignalR
+                            if (!string.IsNullOrEmpty(dni))
+                            {
+                                _progressNotification.NotifySampleStartedAsync(dni, currentSample, maxModels).Wait();
+                            }
+                        };
 
-   enrollment.OnTakeOff += (FTR_PROGRESS p) =>
-      {
-  if (currentSample < maxModels)
-             {
-              _logger.LogInformation($"? Muestra {currentSample} capturada");
-   Console.WriteLine($"? ? Muestra {currentSample} capturada. Retire el dedo completamente.");
-    Console.WriteLine("  ?? Para la siguiente: varíe ligeramente rotación y presión");
-      }
-       else
-      {
-           _logger.LogInformation("Procesando template final...");
-   Console.WriteLine("? ?? Procesando template final...");
-              }
-             };
+                        enrollment.OnTakeOff += (FTR_PROGRESS p) =>
+                        {
+                            if (currentSample < maxModels)
+                            {
+                                _logger.LogInformation($"? Muestra {currentSample} capturada");
+                                Console.WriteLine($"? ? Muestra {currentSample} capturada. Retire el dedo completamente.");
+                                Console.WriteLine("  ?? Para la siguiente: varíe ligeramente rotación y presión");
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Procesando template final...");
+                                Console.WriteLine("?? ?? Procesando template final...");
+                            }
+                        };
 
-       enrollment.OnFakeSource += (FTR_PROGRESS p) =>
-      {
-_logger.LogWarning("? Señal ambigua detectada");
-            Console.WriteLine("? Señal ambigua detectada. Limpie el sensor y reposicione.");
-   return true;
-            };
+                        enrollment.OnFakeSource += (FTR_PROGRESS p) =>
+                        {
+                            _logger.LogWarning("?? Señal ambigua detectada");
+                            Console.WriteLine("?? Señal ambigua detectada. Limpie el sensor y reposicione.");
+                            return true;
+                        };
 
-              enrollment.OnEnrollmentComplete += (bool success, int resultCode) =>
-              {
-    try
-           {
-  _logger.LogDebug($"Enrollment complete: Success={success}, ResultCode={resultCode}");
+                        enrollment.OnEnrollmentComplete += (bool success, int resultCode) =>
+                        {
+                            try
+                            {
+                                _logger.LogDebug($"Enrollment complete: Success={success}, ResultCode={resultCode}");
 
-          enrollResult.ResultCode = resultCode;
-        enrollResult.Success = success;
+                                enrollResult.ResultCode = resultCode;
+                                enrollResult.Success = success;
 
-if (success && resultCode == 0)
-            {
-   enrollResult.Template = enrollment.Template;
-         enrollResult.Quality = enrollment.Quality;
-    enrollResult.Success = true;
- enrollResult.CapturedImages = capturedImages;
+                                if (success && resultCode == 0)
+                                {
+                                    enrollResult.Template = enrollment.Template;
+                                    enrollResult.Quality = enrollment.Quality;
+                                    enrollResult.Success = true;
+                                    enrollResult.CapturedImages = capturedImages;
 
-   _logger.LogInformation($"? Registro exitoso - Template: {enrollResult.Template?.Length ?? 0} bytes, Imágenes: {capturedImages.Count}");
-    Console.WriteLine($"\n? ¡Captura exitosa!");
-          Console.WriteLine($"   ?? Template: {enrollResult.Template?.Length ?? 0} bytes");
-    Console.WriteLine($"   ?? Total de imágenes: {capturedImages.Count}");
+                                    _logger.LogInformation($"? Registro exitoso - Template: {enrollResult.Template?.Length ?? 0} bytes, Imágenes: {capturedImages.Count}");
+                                    Console.WriteLine($"\n? ¡Captura exitosa!");
+                                    Console.WriteLine($"   ?? Template: {enrollResult.Template?.Length ?? 0} bytes");
+                                    Console.WriteLine($"   ??? Total de imágenes: {capturedImages.Count}");
 
-   if (capturedImages.Count > 0)
-         {
-           Console.WriteLine($"   ?? Calidad promedio: {capturedImages.Average(img => img.Quality):F2}");
-    }
-   }
-    else
-         {
-               enrollResult.Success = false;
-         enrollResult.ErrorCode = resultCode;
-     _logger.LogWarning($"Enrollment failed with code: {resultCode}");
-       Console.WriteLine($"? Captura falló con código: {resultCode}");
-          }
-       }
- finally
-     {
-     done.Set();
-       }
-             };
+                                    if (capturedImages.Count > 0)
+                                    {
+                                        Console.WriteLine($"   ? Calidad promedio: {capturedImages.Average(img => img.Quality):F2}");
+                                        
+                                        // ? Notificar operación completada por SignalR
+                                        if (!string.IsNullOrEmpty(dni))
+                                        {
+                                            _progressNotification.NotifyCompleteAsync(
+                                                dni,
+                                                true,
+                                                "Registro completado exitosamente",
+                                                new
+                                                {
+                                                    samplesCollected = capturedImages.Count,
+                                                    averageQuality = capturedImages.Average(img => img.Quality)
+                                                }
+                                            ).Wait();
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    enrollResult.Success = false;
+                                    enrollResult.ErrorCode = resultCode;
+                                    _logger.LogWarning($"Enrollment failed with code: {resultCode}");
+                                    Console.WriteLine($"? Captura falló con código: {resultCode}");
+                                    
+                                    // ? Notificar error por SignalR
+                                    if (!string.IsNullOrEmpty(dni))
+                                    {
+                                        _progressNotification.NotifyErrorAsync(dni, $"Error en registro: código {resultCode}").Wait();
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                done.Set();
+                            }
+                        };
 
-        Console.WriteLine("\n?? Iniciando proceso de captura...");
-   Console.WriteLine("Instrucciones:");
-          Console.WriteLine("1. Apoye el dedo cuando se indique");
-         Console.WriteLine("  2. Mantenga firme hasta que se le pida retirar");
-    Console.WriteLine("  3. Retire completamente y espere siguiente indicación");
-            Console.WriteLine("  4. Varíe ligeramente la posición en cada muestra\n");
+                        Console.WriteLine("\n?? Iniciando proceso de captura...");
+                        Console.WriteLine("Instrucciones:");
+                        Console.WriteLine("1. Apoye el dedo cuando se indique");
+                        Console.WriteLine("  2. Mantenga firme hasta que se le pida retirar");
+                        Console.WriteLine("  3. Retire completamente y espere siguiente indicación");
+                        Console.WriteLine("  4. Varíe ligeramente la posición en cada muestra\n");
 
- enrollment.Enrollment();
+                        enrollment.Enrollment();
 
-     if (!done.WaitOne(timeout))
-     {
-     _logger.LogWarning("Enrollment timeout");
-     Console.WriteLine("? Timeout - Proceso interrumpido");
-     return null;
-            }
+                        if (!done.WaitOne(timeout))
+                        {
+                            _logger.LogWarning("Enrollment timeout");
+                            Console.WriteLine("?? Timeout - Proceso interrumpido");
+                            
+                            // ? Notificar timeout por SignalR
+                            if (!string.IsNullOrEmpty(dni))
+                            {
+                                _progressNotification.NotifyErrorAsync(dni, "Timeout durante el registro").Wait();
+                            }
+                            
+                            return null;
+                        }
 
-  return enrollResult.Success ? enrollResult : null;
-     }
-           }
-    catch (Exception ex)
-       {
-   _logger.LogError(ex, "Error during enrollment");
-   Console.WriteLine($"? Error: {ex.Message}");
+                        return enrollResult.Success ? enrollResult : null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error during enrollment");
+                    Console.WriteLine($"? Error: {ex.Message}");
+                    
+                    // ? Notificar excepción por SignalR
+                    if (!string.IsNullOrEmpty(dni))
+                    {
+                        _progressNotification.NotifyErrorAsync(dni, $"Error durante registro: {ex.Message}").Wait();
+                    }
+                    
                     return null;
-    }
-      }
-     }
+                }
+            }
+        }
 
-        private void ConfigureImageCapture(FutronicEnrollment enrollment, List<CapturedImage> capturedImages, int currentSample)
+        private void ConfigureImageCapture(FutronicEnrollment enrollment, List<CapturedImage> capturedImages, int currentSample, int maxModels, string dni = null)
         {
             try
-      {
+            {
                 var eventInfo = enrollment.GetType().GetEvent("UpdateScreenImage");
-     if (eventInfo != null)
-    {
-            _logger.LogInformation("? Sistema de captura de imágenes activado");
-     Console.WriteLine("? Sistema de captura de imágenes activado\n");
+                if (eventInfo != null)
+                {
+                    _logger.LogInformation("?? Sistema de captura de imágenes activado");
+                    Console.WriteLine("?? Sistema de captura de imágenes activado\n");
 
-   Action<object> imageHandler = (bitmap) =>
- {
-         try
-           {
-   if (bitmap != null)
-           {
-         byte[] imageData = ImageUtils.ConvertBitmapToBytes(bitmap);
-      if (imageData != null && imageData.Length > 0)
-     {
-       double quality = ImageUtils.CalculateImageQuality(imageData);
+                    Action<object> imageHandler = (bitmap) =>
+                    {
+                        try
+                        {
+                            if (bitmap != null)
+                            {
+                                byte[] imageData = ImageUtils.ConvertBitmapToBytes(bitmap);
+                                if (imageData != null && imageData.Length > 0)
+                                {
+                                    double quality = ImageUtils.CalculateImageQuality(imageData);
 
-    var capturedImage = new CapturedImage
- {
-     ImageData = imageData,
-       SampleIndex = currentSample,
-            CaptureTime = DateTime.Now,
-           Quality = quality
-         };
+                                    var capturedImage = new CapturedImage
+                                    {
+                                        ImageData = imageData,
+                                        SampleIndex = currentSample,
+                                        CaptureTime = DateTime.Now,
+                                        Quality = quality
+                                    };
 
-              capturedImages.Add(capturedImage);
-          Console.WriteLine($"   ?? Imagen capturada - Muestra: {currentSample}, Calidad: {quality:F2}");
-      }
-        }
-  }
- catch (Exception ex)
-  {
-     _logger.LogWarning(ex, "Error capturando imagen");
-           }
-        };
+                                    capturedImages.Add(capturedImage);
+                                    Console.WriteLine($"   ?? Imagen capturada - Muestra: {currentSample}, Calidad: {quality:F2}");
+                                    
+                                    // ? Notificar imagen capturada por SignalR con Base64
+                                    if (!string.IsNullOrEmpty(dni))
+                                    {
+                                        _progressNotification.NotifySampleCapturedAsync(
+                                            dni,
+                                            currentSample,
+                                            maxModels,
+                                            quality,
+                                            imageData  // ? Enviar imagen en Base64
+                                        ).Wait();
+                                        
+                                        _logger.LogInformation($"?? Notificación SignalR enviada: Muestra {currentSample}/{maxModels}, Calidad: {quality:F2}, Imagen: {imageData.Length} bytes");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error capturando imagen");
+                        }
+                    };
 
-         var handlerType = eventInfo.EventHandlerType;
-       var convertedHandler = Delegate.CreateDelegate(handlerType, imageHandler.Target, imageHandler.Method);
-    eventInfo.AddEventHandler(enrollment, convertedHandler);
-      }
-       else
-           {
- _logger.LogWarning("? Captura de imágenes no disponible");
-      }
- }
+                    var handlerType = eventInfo.EventHandlerType;
+                    var convertedHandler = Delegate.CreateDelegate(handlerType, imageHandler.Target, imageHandler.Method);
+                    eventInfo.AddEventHandler(enrollment, convertedHandler);
+                }
+                else
+                {
+                    _logger.LogWarning("?? Captura de imágenes no disponible");
+                }
+            }
             catch (Exception ex)
-{
- _logger.LogWarning(ex, "Error configurando captura de imágenes");
-      }
+            {
+                _logger.LogWarning(ex, "Error configurando captura de imágenes");
+            }
         }
 
         private VerifyResultInternal VerifyTemplatesInternal(byte[] referenceTemplate, byte[] capturedTemplate)
