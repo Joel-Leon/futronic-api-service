@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Futronic API - Cliente SignalR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button.primary {
+            background-color: #007bff;
+            color: white;
+        }
+        button.danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #notifications {
+            margin-top: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .notification {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 4px solid #007bff;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .notification.error {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .notification.success {
+            border-left-color: #28a745;
+            background-color: #d4edda;
+        }
+        .notification-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .notification-time {
+            font-size: 12px;
+            color: #666;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>?? Futronic API - Notificaciones en Tiempo Real</h1>
+        
+        <div id="status" class="status disconnected">
+            ?? Desconectado
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="primary" onclick="connect()">
+                Conectar
+            </button>
+            <button id="disconnectBtn" class="danger" onclick="disconnect()" disabled>
+                Desconectar
+            </button>
+            <button onclick="subscribeToDni()" disabled id="subscribeBtn" class="primary">
+                Suscribirse a DNI
+            </button>
+            <button onclick="clearNotifications()" class="primary">
+                Limpiar
+            </button>
+        </div>
+
+        <div class="progress-bar" id="progressContainer" style="display: none;">
+            <div class="progress-fill" id="progressBar" style="width: 0%">
+                0%
+            </div>
+        </div>
+
+        <h2>?? Notificaciones</h2>
+        <div id="notifications">
+            <p style="text-align: center; color: #999;">
+                Esperando notificaciones...
+            </p>
+        </div>
+    </div>
+
+    <script>
+        let connection = null;
+        let connectionId = null;
+
+        // Configurar conexión SignalR
+        function setupConnection() {
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("http://localhost:5000/hubs/fingerprint")
+                .withAutomaticReconnect([0, 2000, 5000, 10000])
+                .configureLogging(signalR.LogLevel.Information)
+                .build();
+
+            // Evento: Conectado
+            connection.on("Connected", (data) => {
+                connectionId = data.connectionId;
+                updateStatus(true);
+                addNotification("success", "Conectado", `Connection ID: ${connectionId}`);
+            });
+
+            // Evento: Progreso recibido
+            connection.on("ReceiveProgress", (data) => {
+                console.log("Progress received:", data);
+                handleProgress(data);
+            });
+
+            // Evento: Reconectando
+            connection.onreconnecting((error) => {
+                updateStatus(false);
+                addNotification("error", "Reconectando...", error?.message || "Conexión perdida");
+            });
+
+            // Evento: Reconectado
+            connection.onreconnected((connectionId) => {
+                updateStatus(true);
+                addNotification("success", "Reconectado", `Nueva Connection ID: ${connectionId}`);
+            });
+
+            // Evento: Desconectado
+            connection.onclose((error) => {
+                updateStatus(false);
+                if (error) {
+                    addNotification("error", "Desconectado", error.message);
+                }
+            });
+        }
+
+        // Conectar al Hub
+        async function connect() {
+            try {
+                setupConnection();
+                await connection.start();
+                document.getElementById("connectBtn").disabled = true;
+                document.getElementById("disconnectBtn").disabled = false;
+                document.getElementById("subscribeBtn").disabled = false;
+            } catch (error) {
+                console.error("Error connecting:", error);
+                addNotification("error", "Error de conexión", error.message);
+            }
+        }
+
+        // Desconectar del Hub
+        async function disconnect() {
+            try {
+                await connection.stop();
+                document.getElementById("connectBtn").disabled = false;
+                document.getElementById("disconnectBtn").disabled = true;
+                document.getElementById("subscribeBtn").disabled = true;
+                hideProgress();
+            } catch (error) {
+                console.error("Error disconnecting:", error);
+            }
+        }
+
+        // Suscribirse a notificaciones de un DNI específico
+        async function subscribeToDni() {
+            const dni = prompt("Ingrese el DNI para suscribirse a sus notificaciones:");
+            if (dni && connection) {
+                try {
+                    await connection.invoke("SubscribeToDni", dni);
+                    addNotification("success", "Suscrito", `Suscrito a notificaciones del DNI: ${dni}`);
+                } catch (error) {
+                    addNotification("error", "Error de suscripción", error.message);
+                }
+            }
+        }
+
+        // Manejar notificación de progreso
+        function handleProgress(data) {
+            const { eventType, message, data: progressData, timestamp } = data;
+
+            let type = "info";
+            if (eventType.includes("error") || eventType.includes("failed")) {
+                type = "error";
+            } else if (eventType.includes("completed") || eventType.includes("success")) {
+                type = "success";
+            }
+
+            addNotification(type, eventType, message, timestamp);
+
+            // Actualizar barra de progreso si hay datos
+            if (progressData?.progress !== undefined) {
+                updateProgress(progressData.progress, message);
+            } else if (eventType === "operation_completed" || eventType === "operation_failed") {
+                hideProgress();
+            } else if (eventType === "operation_started") {
+                showProgress();
+            }
+        }
+
+        // Agregar notificación a la lista
+        function addNotification(type, title, message, timestamp = null) {
+            const container = document.getElementById("notifications");
+            
+            // Remover mensaje de "Esperando..."
+            if (container.children.length === 1 && container.children[0].textContent.includes("Esperando")) {
+                container.innerHTML = "";
+            }
+
+            const notification = document.createElement("div");
+            notification.className = `notification ${type}`;
+            
+            const time = timestamp || new Date().toLocaleTimeString();
+            
+            notification.innerHTML = `
+                <div class="notification-header">${title}</div>
+                <div>${message}</div>
+                <div class="notification-time">${time}</div>
+            `;
+
+            container.insertBefore(notification, container.firstChild);
+
+            // Limitar a 50 notificaciones
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Actualizar estado de conexión
+        function updateStatus(connected) {
+            const status = document.getElementById("status");
+            if (connected) {
+                status.className = "status connected";
+                status.innerHTML = "?? Conectado";
+            } else {
+                status.className = "status disconnected";
+                status.innerHTML = "?? Desconectado";
+            }
+        }
+
+        // Mostrar barra de progreso
+        function showProgress() {
+            document.getElementById("progressContainer").style.display = "block";
+            updateProgress(0, "Iniciando...");
+        }
+
+        // Actualizar barra de progreso
+        function updateProgress(percent, message) {
+            const progressBar = document.getElementById("progressBar");
+            progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${Math.round(percent)}% - ${message}`;
+        }
+
+        // Ocultar barra de progreso
+        function hideProgress() {
+            setTimeout(() => {
+                document.getElementById("progressContainer").style.display = "none";
+            }, 2000);
+        }
+
+        // Limpiar notificaciones
+        function clearNotifications() {
+            const container = document.getElementById("notifications");
+            container.innerHTML = `
+                <p style="text-align: center; color: #999;">
+                    Esperando notificaciones...
+                </p>
+            `;
+        }
+
+        // Auto-conectar al cargar la página
+        window.addEventListener("load", () => {
+            console.log("Página cargada. Listo para conectar.");
+        });
+    </script>
+</body>
+</html>

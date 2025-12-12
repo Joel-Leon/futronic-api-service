@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo - Futronic Fingerprint API</title>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .tab.active {
+            background: #4caf50;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-card {
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .status-card.info {
+            background: #e3f2fd;
+            border: 2px solid #2196f3;
+        }
+
+        .status-card.success {
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+        }
+
+        .status-card.error {
+            background: #ffebee;
+            border: 2px solid #f44336;
+        }
+
+        .status-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .progress-container {
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2196f3, #4caf50);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-text {
+            display: block;
+            text-align: center;
+            margin-top: 5px;
+            font-weight: bold;
+        }
+
+        .samples-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .sample-card {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .sample-card img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .quality-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .quality-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff9800, #4caf50);
+        }
+
+        .result-card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .result-card.success {
+            border-left: 5px solid #4caf50;
+        }
+
+        .result-card.failure {
+            border-left: 5px solid #f44336;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .result-header .icon {
+            font-size: 48px;
+        }
+
+        .captured-image {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .captured-image img {
+            max-width: 300px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric {
+            text-align: center;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .metric .label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .metric .value {
+            display: block;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .metric .value.good {
+            color: #4caf50;
+        }
+
+        .metric .value.bad {
+            color: #f44336;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #e0e0e0;
+            border-top: 4px solid #2196f3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .log-console {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+        }
+
+        .log-entry.info { color: #4fc3f7; }
+        .log-entry.success { color: #81c784; }
+        .log-entry.error { color: #e57373; }
+        .log-entry.warning { color: #ffb74d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>?? Futronic Fingerprint API</h1>
+            <p>Demo de Integración Frontend</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('register')">?? Registro</button>
+            <button class="tab" onclick="showTab('verify')">? Verificación</button>
+            <button class="tab" onclick="showTab('identify')">?? Identificación</button>
+        </div>
+
+        <!-- TAB: REGISTRO -->
+        <div id="tab-register" class="tab-content active">
+            <h2>?? Registro de Huella</h2>
+            
+            <div class="form-group">
+                <label for="register-dni">DNI:</label>
+                <input type="text" id="register-dni" placeholder="Ej: 12345678" value="12345678">
+            </div>
+
+            <div class="form-group">
+                <label for="register-finger">Dedo:</label>
+                <select id="register-finger">
+                    <option value="pulgar-derecho">Pulgar Derecho</option>
+                    <option value="indice-derecho" selected>Índice Derecho</option>
+                    <option value="medio-derecho">Medio Derecho</option>
+                    <option value="anular-derecho">Anular Derecho</option>
+                    <option value="menique-derecho">Meñique Derecho</option>
+                    <option value="pulgar-izquierdo">Pulgar Izquierdo</option>
+                    <option value="indice-izquierdo">Índice Izquierdo</option>
+                    <option value="medio-izquierdo">Medio Izquierdo</option>
+                    <option value="anular-izquierdo">Anular Izquierdo</option>
+                    <option value="menique-izquierdo">Meñique Izquierdo</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="register-samples">Número de Muestras:</label>
+                <select id="register-samples">
+                    <option value="3">3 muestras (rápido)</option>
+                    <option value="5" selected>5 muestras (recomendado)</option>
+                    <option value="7">7 muestras (alta seguridad)</option>
+                    <option value="10">10 muestras (máxima seguridad)</option>
+                </select>
+            </div>
+
+            <button class="btn" onclick="startRegistration()">Iniciar Registro</button>
+
+            <div id="register-status"></div>
+            <div id="register-progress"></div>
+            <div id="register-samples"></div>
+            <div id="register-result"></div>
+        </div>
+
+        <!-- TAB: VERIFICACIÓN -->
+        <div id="tab-verify" class="tab-content">
+            <h2>? Verificación de Huella</h2>
+            
+            <div class="form-group">
+                <label for="verify-dni">DNI:</label>
+                <input type="text" id="verify-dni" placeholder="Ej: 12345678" value="12345678">
+            </div>
+
+            <div class="form-group">
+                <label for="verify-finger">Dedo:</label>
+                <select id="verify-finger">
+                    <option value="pulgar-derecho">Pulgar Derecho</option>
+                    <option value="indice-derecho" selected>Índice Derecho</option>
+                    <option value="medio-derecho">Medio Derecho</option>
+                    <option value="anular-derecho">Anular Derecho</option>
+                    <option value="menique-derecho">Meñique Derecho</option>
+                    <option value="pulgar-izquierdo">Pulgar Izquierdo</option>
+                    <option value="indice-izquierdo">Índice Izquierdo</option>
+                    <option value="medio-izquierdo">Medio Izquierdo</option>
+                    <option value="anular-izquierdo">Anular Izquierdo</option>
+                    <option value="menique-izquierdo">Meñique Izquierdo</option>
+                </select>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="verify-include-image" checked>
+                <label for="verify-include-image">Incluir imagen capturada</label>
+            </div>
+
+            <button class="btn" onclick="startVerification()">Verificar Huella</button>
+
+            <div id="verify-status"></div>
+            <div id="verify-result"></div>
+        </div>
+
+        <!-- TAB: IDENTIFICACIÓN -->
+        <div id="tab-identify" class="tab-content">
+            <h2>?? Identificación de Usuario</h2>
+            
+            <div class="form-group">
+                <label for="identify-directory">Directorio de Templates:</label>
+                <input type="text" id="identify-directory" value="C:/temp/fingerprints">
+            </div>
+
+            <button class="btn" onclick="startIdentification()">Identificar Usuario</button>
+
+            <div id="identify-status"></div>
+            <div id="identify-result"></div>
+        </div>
+
+        <!-- CONSOLE LOG -->
+        <div class="log-console" id="console-log">
+            <div class="log-entry info">?? Consola de logs - Listo para usar</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000';
+        let signalRConnection = null;
+        let currentSamples = [];
+
+        // Función para cambiar de tab
+        function showTab(tabName) {
+            // Ocultar todos los tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Mostrar tab seleccionado
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            event.target.classList.add('active');
+
+            addLog(`Cambiado a pestaña: ${tabName}`, 'info');
+        }
+
+        // Función para agregar logs
+        function addLog(message, type = 'info') {
+            const console = document.getElementById('console-log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            console.appendChild(entry);
+            console.scrollTop = console.scrollHeight;
+        }
+
+        // ============================================
+        // REGISTRO
+        // ============================================
+        async function startRegistration() {
+            const dni = document.getElementById('register-dni').value;
+            const finger = document.getElementById('register-finger').value;
+            const sampleCount = parseInt(document.getElementById('register-samples').value);
+
+            if (!dni) {
+                alert('Por favor ingrese un DNI');
+                return;
+            }
+
+            try {
+                addLog(`Iniciando registro para DNI: ${dni}`, 'info');
+                
+                // Limpiar resultados anteriores
+                document.getElementById('register-status').innerHTML = '';
+                document.getElementById('register-progress').innerHTML = '';
+                document.getElementById('register-samples').innerHTML = '';
+                document.getElementById('register-result').innerHTML = '';
+                currentSamples = [];
+
+                // Conectar a SignalR
+                await connectSignalR(dni);
+
+                // Iniciar registro
+                const response = await fetch(`${API_BASE_URL}/api/fingerprint/register-multi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dni: dni,
+                        dedo: finger,
+                        sampleCount: sampleCount,
+                        includeImages: false
+                    })
+                });
+
+                const result = await response.json();
+
+                if (signalRConnection) {
+                    await signalRConnection.stop();
+                }
+
+                if (result.success) {
+                    addLog('? Registro completado exitosamente', 'success');
+                    showRegistrationResult(result.data);
+                } else {
+                    addLog(`? Error: ${result.message}`, 'error');
+                    showError('register-status', result.message);
+                }
+
+            } catch (error) {
+                addLog(`? Error: ${error.message}`, 'error');
+                showError('register-status', error.message);
+                
+                if (signalRConnection) {
+                    await signalRConnection.stop();
+                }
+            }
+        }
+
+        async function connectSignalR(dni) {
+            addLog('Conectando a SignalR...', 'info');
+
+            signalRConnection = new signalR.HubConnectionBuilder()
+                .withUrl(`${API_BASE_URL}/hubs/fingerprint`)
+                .withAutomaticReconnect()
+                .build();
+
+            signalRConnection.on('ReceiveProgress', handleNotification);
+
+            await signalRConnection.start();
+            await signalRConnection.invoke('SubscribeToDni', dni);
+
+            addLog('? Conectado a SignalR', 'success');
+        }
+
+        function handleNotification(notification) {
+            addLog(`?? ${notification.eventType}: ${notification.message}`, 'info');
+
+            switch (notification.eventType) {
+                case 'operation_started':
+                    showStatus('register-status', 'info', '?', 'Iniciando registro...');
+                    break;
+
+                case 'sample_started':
+                    showStatus('register-status', 'info', '??', 
+                        `Coloque el dedo - Muestra ${notification.data.currentSample}/${notification.data.totalSamples}`);
+                    updateProgress(notification.data.progress);
+                    break;
+
+                case 'sample_captured':
+                    showStatus('register-status', 'success', '?', 
+                        `Muestra ${notification.data.currentSample} capturada - Retire el dedo`);
+                    updateProgress(notification.data.progress);
+                    addSample(notification.data);
+                    break;
+
+                case 'operation_completed':
+                    showStatus('register-status', 'success', '?', 'Registro completado');
+                    updateProgress(100);
+                    break;
+
+                case 'error':
+                    showStatus('register-status', 'error', '?', notification.message);
+                    break;
+            }
+        }
+
+        function showStatus(elementId, type, icon, message) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = `
+                <div class="status-card ${type}">
+                    <div class="status-icon">${icon}</div>
+                    <p>${message}</p>
+                </div>
+            `;
+        }
+
+        function updateProgress(percent) {
+            const container = document.getElementById('register-progress');
+            container.innerHTML = `
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percent}%"></div>
+                    </div>
+                    <span class="progress-text">${percent}%</span>
+                </div>
+            `;
+        }
+
+        function addSample(data) {
+            currentSamples.push(data);
+            
+            const container = document.getElementById('register-samples');
+            const samplesHTML = currentSamples.map(sample => `
+                <div class="sample-card">
+                    <img src="data:image/bmp;base64,${sample.imageBase64}" alt="Muestra ${sample.currentSample}">
+                    <p>Muestra ${sample.currentSample}</p>
+                    <div class="quality-bar">
+                        <div class="quality-fill" style="width: ${sample.quality}%"></div>
+                    </div>
+                    <span>${sample.quality.toFixed(1)}</span>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <h3>Muestras Capturadas</h3>
+                <div class="samples-grid">${samplesHTML}</div>
+            `;
+        }
+
+        function showRegistrationResult(data) {
+            const avgQuality = data.averageQuality || 0;
+            
+            document.getElementById('register-result').innerHTML = `
+                <div class="result-card success">
+                    <h3>? Registro Completado</h3>
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="label">Muestras</span>
+                            <span class="value good">${data.samplesCollected}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="label">Calidad Promedio</span>
+                            <span class="value good">${avgQuality.toFixed(2)}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="label">DNI</span>
+                            <span class="value">${data.dni}</span>
+                        </div>
+                    </div>
+                    <p><strong>Template:</strong> ${data.templatePath}</p>
+                </div>
+            `;
+        }
+
+        // ============================================
+        // VERIFICACIÓN
+        // ============================================
+        async function startVerification() {
+            const dni = document.getElementById('verify-dni').value;
+            const finger = document.getElementById('verify-finger').value;
+            const includeImage = document.getElementById('verify-include-image').checked;
+
+            if (!dni) {
+                alert('Por favor ingrese un DNI');
+                return;
+            }
+
+            try {
+                addLog(`Iniciando verificación para DNI: ${dni}`, 'info');
+                
+                showStatus('verify-status', 'info', '?', '?? Coloque el dedo en el sensor...');
+
+                const response = await fetch(`${API_BASE_URL}/api/fingerprint/verify-simple`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dni: dni,
+                        dedo: finger,
+                        includeCapturedImage: includeImage
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    addLog(`${result.data.verified ? '? Verificado' : '? No verificado'}`, 
+                        result.data.verified ? 'success' : 'warning');
+                    showVerificationResult(result.data);
+                } else {
+                    addLog(`? Error: ${result.message}`, 'error');
+                    showError('verify-status', result.message);
+                }
+
+            } catch (error) {
+                addLog(`? Error: ${error.message}`, 'error');
+                showError('verify-status', error.message);
+            }
+        }
+
+        function showVerificationResult(data) {
+            const statusClass = data.verified ? 'success' : 'failure';
+            const icon = data.verified ? '?' : '?';
+            const title = data.verified ? 'Verificación Exitosa' : 'Huella No Coincide';
+
+            const imageHTML = data.capturedImageBase64 ? `
+                <div class="captured-image">
+                    <h4>Huella Capturada</h4>
+                    <img src="data:image/${data.capturedImageFormat};base64,${data.capturedImageBase64}" 
+                         alt="Huella capturada">
+                </div>
+            ` : '';
+
+            document.getElementById('verify-result').innerHTML = `
+                <div class="result-card ${statusClass}">
+                    <div class="result-header">
+                        <span class="icon">${icon}</span>
+                        <h3>${title}</h3>
+                    </div>
+
+                    ${imageHTML}
+
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="label">Score FAR</span>
+                            <span class="value ${data.score < data.threshold ? 'good' : 'bad'}">
+                                ${data.score}
+                            </span>
+                        </div>
+                        <div class="metric">
+                            <span class="label">Umbral</span>
+                            <span class="value">${data.threshold}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="label">Calidad</span>
+                            <span class="value">${data.captureQuality.toFixed(1)}</span>
+                        </div>
+                    </div>
+
+                    <p><strong>DNI:</strong> ${data.dni}</p>
+                    <p><strong>Dedo:</strong> ${data.dedo}</p>
+                    
+                    <div style="margin-top: 15px; padding: 15px; background: #f5f5f5; border-radius: 6px;">
+                        <p><strong>Interpretación:</strong></p>
+                        <p>${data.verified 
+                            ? `La huella coincide con el registro. Score ${data.score} por debajo del umbral ${data.threshold}.`
+                            : `La huella NO coincide. Score ${data.score} supera el umbral ${data.threshold}.`
+                        }</p>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('verify-status').innerHTML = '';
+        }
+
+        // ============================================
+        // IDENTIFICACIÓN
+        // ============================================
+        async function startIdentification() {
+            const directory = document.getElementById('identify-directory').value;
+
+            try {
+                addLog('Iniciando identificación...', 'info');
+                
+                showStatus('identify-status', 'info', '?', '?? Coloque el dedo en el sensor...');
+
+                const response = await fetch(`${API_BASE_URL}/api/fingerprint/identify-live`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        templatesDirectory: directory,
+                        timeout: 30000
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    addLog(result.data.matched ? '? Usuario identificado' : '? No identificado', 
+                        result.data.matched ? 'success' : 'warning');
+                    showIdentificationResult(result.data);
+                } else {
+                    addLog(`? Error: ${result.message}`, 'error');
+                    showError('identify-status', result.message);
+                }
+
+            } catch (error) {
+                addLog(`? Error: ${error.message}`, 'error');
+                showError('identify-status', error.message);
+            }
+        }
+
+        function showIdentificationResult(data) {
+            if (data.matched) {
+                document.getElementById('identify-result').innerHTML = `
+                    <div class="result-card success">
+                        <div class="result-header">
+                            <span class="icon">?</span>
+                            <h3>Usuario Identificado</h3>
+                        </div>
+
+                        <div class="metrics">
+                            <div class="metric">
+                                <span class="label">DNI</span>
+                                <span class="value good">${data.dni}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">Score FAR</span>
+                                <span class="value good">${data.score}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">Posición</span>
+                                <span class="value">${data.matchIndex + 1} / ${data.totalCompared}</span>
+                            </div>
+                        </div>
+
+                        <p><strong>Dedo:</strong> ${data.dedo}</p>
+                        <p><strong>Template:</strong> ${data.templatePath}</p>
+                    </div>
+                `;
+            } else {
+                document.getElementById('identify-result').innerHTML = `
+                    <div class="result-card failure">
+                        <div class="result-header">
+                            <span class="icon">?</span>
+                            <h3>Usuario No Identificado</h3>
+                        </div>
+                        <p>No se encontró coincidencia en la base de datos</p>
+                        <p><strong>Templates comparados:</strong> ${data.totalCompared}</p>
+                    </div>
+                `;
+            }
+
+            document.getElementById('identify-status').innerHTML = '';
+        }
+
+        // ============================================
+        // UTILIDADES
+        // ============================================
+        function showError(elementId, message) {
+            document.getElementById(elementId).innerHTML = `
+                <div class="status-card error">
+                    <div class="status-icon">?</div>
+                    <p>${message}</p>
+                </div>
+            `;
+        }
+
+        // Verificar estado del servicio al cargar
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/health`);
+                const result = await response.json();
+                
+                if (result.success && result.data.deviceConnected) {
+                    addLog('? Servicio disponible - Dispositivo conectado', 'success');
+                } else {
+                    addLog('?? Servicio disponible pero dispositivo NO conectado', 'warning');
+                }
+            } catch (error) {
+                addLog('? No se puede conectar con el servicio', 'error');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,7 +1,9 @@
+using System;
 using System.Threading.Tasks;
 using FutronicService.Models;
 using FutronicService.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace FutronicService.Controllers
@@ -175,6 +177,83 @@ public async Task<IActionResult> VerifySimple([FromBody] VerifySimpleRequest req
             return Ok(result);
      }
 
+        /// <summary>
+        /// POST /api/fingerprint/test-signalr
+        /// Endpoint de prueba para verificar que SignalR funciona correctamente
+        /// </summary>
+        [HttpPost("test-signalr")]
+        public IActionResult TestSignalR([FromBody] TestSignalRRequest request)
+        {
+            _logger.LogInformation($"Test SignalR endpoint called for DNI: {request?.Dni}");
+
+            if (request == null || string.IsNullOrEmpty(request.Dni))
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse(
+                    "DNI es requerido en el body: { \"dni\": \"12345678\" }",
+                    "INVALID_INPUT"
+                ));
+            }
+
+            try
+            {
+                // Inyectar el servicio de notificaciones
+                var progressService = HttpContext.RequestServices.GetService(typeof(IProgressNotificationService)) as IProgressNotificationService;
+
+                if (progressService == null)
+                {
+                    return StatusCode(500, ApiResponse<object>.ErrorResponse(
+                        "IProgressNotificationService no está disponible",
+                        "SERVICE_ERROR"
+                    ));
+                }
+
+                // Enviar notificación de prueba
+                var testData = new
+                {
+                    test = true,
+                    message = "Esta es una notificación de prueba de SignalR",
+                    timestamp = DateTime.UtcNow,
+                    sampleNumber = 1,
+                    quality = 95.5,
+                    imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" // 1x1 pixel transparente
+                };
+
+                progressService.NotifyAsync(
+                    eventType: "test",
+                    message: $"?? Test de SignalR para DNI: {request.Dni}",
+                    data: testData,
+                    dni: request.Dni
+                ).Wait();
+
+                _logger.LogInformation($"? Test SignalR notification sent to DNI group: {request.Dni}");
+
+                return Ok(ApiResponse<object>.SuccessResponse(
+                    $"Notificación de prueba enviada al grupo DNI: {request.Dni}",
+                    new
+                    {
+                        dni = request.Dni,
+                        eventType = "test",
+                        sentAt = DateTime.UtcNow,
+                        instructions = new[]
+                        {
+                            "1. Conecta tu frontend a SignalR: http://localhost:5000/hubs/fingerprint",
+                            "2. Suscríbete al DNI usando: connection.invoke('SubscribeToDni', '" + request.Dni + "')",
+                            "3. Escucha eventos con: connection.on('ReceiveProgress', callback)",
+                            "4. Deberías recibir esta notificación de prueba"
+                        }
+                    }
+                ));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error enviando notificación de prueba");
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(
+                    $"Error enviando notificación: {ex.Message}",
+                    "TEST_ERROR"
+                ));
+            }
+        }
+
   private IActionResult GetErrorStatusCode<T>(ApiResponse<T> response)
         {
             if (response.Error == null)
@@ -198,4 +277,10 @@ public async Task<IActionResult> VerifySimple([FromBody] VerifySimpleRequest req
       }
      }
     }
+
+// Modelo para el request de test
+public class TestSignalRRequest
+{
+    public string Dni { get; set; }
+}
 }

@@ -12,7 +12,7 @@ using FutronicService.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using ReflectionHelper = futronic_cli.ReflectionHelper;
+using ReflectionHelper = FutronicService.Utils.ReflectionHelper;
 
 namespace FutronicService.Services
 {

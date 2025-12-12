@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test SignalR - Futronic API</title>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 20px 0;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .log-entry.success { color: #4ec9b0; }
+        .log-entry.error { color: #f48771; }
+        .log-entry.info { color: #4fc3f7; }
+        .log-entry.event { color: #c586c0; }
+        .log-entry.warning { color: #ffb74d; }
+        .button {
+            padding: 12px 24px;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .button:active {
+            transform: translateY(0);
+        }
+        .button.secondary {
+            background: #6c757d;
+        }
+        .input {
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            margin: 10px 5px;
+            width: 200px;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 20px 0;
+        }
+        .instructions {
+            background: #f0f7ff;
+            padding: 15px;
+            border-left: 4px solid #007acc;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>?? Test de SignalR - Futronic API</h1>
+        
+        <div class="instructions">
+            <strong>?? Instrucciones:</strong>
+            <ol>
+                <li>Haz clic en "Conectar SignalR" para establecer la conexión</li>
+                <li>Ingresa un DNI y haz clic en "Suscribirse al DNI"</li>
+                <li>Haz clic en "Enviar Test" para probar que funciona</li>
+                <li>(Opcional) Haz clic en "Iniciar Registro" para captura real</li>
+            </ol>
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="dni" class="input" placeholder="DNI (ej: 12345678)" value="12345678">
+            <button onclick="connectSignalR()" class="button">1. Conectar SignalR</button>
+            <button onclick="subscribeToDni()" class="button">2. Suscribirse al DNI</button>
+            <button onclick="sendTestNotification()" class="button">3. Enviar Test</button>
+            <button onclick="startRegistration()" class="button">4. Iniciar Registro</button>
+            <button onclick="clearLog()" class="button secondary">Limpiar Log</button>
+        </div>
+
+        <h3>?? Consola de Logs:</h3>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let connection = null;
+        const API_URL = 'http://localhost:5000';
+
+        function addLog(message, type = 'info') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            addLog('Log limpiado', 'info');
+        }
+
+        async function connectSignalR() {
+            try {
+                addLog('?? Conectando a SignalR...', 'info');
+                
+                connection = new signalR.HubConnectionBuilder()
+                    .withUrl(`${API_URL}/hubs/fingerprint`)
+                    .withAutomaticReconnect()
+                    .configureLogging(signalR.LogLevel.Information)
+                    .build();
+
+                // Manejar eventos
+                connection.on('ReceiveProgress', (notification) => {
+                    addLog(`?? EVENTO: ${notification.eventType}`, 'event');
+                    addLog(`   Mensaje: ${notification.message}`, 'info');
+                    
+                    if (notification.data) {
+                        const data = notification.data;
+                        if (data.currentSample) {
+                            addLog(`   ?? Muestra: ${data.currentSample}/${data.totalSamples}`, 'info');
+                        }
+                        if (data.quality) {
+                            addLog(`   ? Calidad: ${data.quality.toFixed(2)}`, 'success');
+                        }
+                        if (data.progress !== undefined) {
+                            addLog(`   ?? Progreso: ${data.progress}%`, 'info');
+                        }
+                        if (data.imageBase64) {
+                            const sizeKB = (data.imageBase64.length * 0.75 / 1024).toFixed(2);
+                            addLog(`   ??? Imagen recibida (${sizeKB} KB)`, 'success');
+                        }
+                    }
+                    
+                    console.log('Notificación completa:', notification);
+                });
+
+                connection.on('Connected', (data) => {
+                    addLog(`? Conectado! ConnectionId: ${data.connectionId}`, 'success');
+                });
+
+                connection.onreconnecting(() => {
+                    addLog('?? Reconectando...', 'warning');
+                });
+
+                connection.onreconnected(() => {
+                    addLog('? Reconectado exitosamente', 'success');
+                });
+
+                connection.onclose(() => {
+                    addLog('?? Conexión cerrada', 'error');
+                });
+
+                await connection.start();
+                addLog('? SignalR conectado exitosamente', 'success');
+                addLog('?? Ahora puedes suscribirte a un DNI', 'info');
+                
+            } catch (error) {
+                addLog(`? Error al conectar: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function subscribeToDni() {
+            if (!connection) {
+                addLog('? Primero conecta SignalR (botón 1)', 'error');
+                return;
+            }
+
+            const dni = document.getElementById('dni').value;
+            if (!dni) {
+                addLog('? Ingresa un DNI', 'error');
+                return;
+            }
+
+            try {
+                addLog(`?? Suscribiéndose al DNI: ${dni}...`, 'info');
+                await connection.invoke('SubscribeToDni', dni);
+                addLog(`? Suscrito exitosamente al grupo DNI: ${dni}`, 'success');
+                addLog('?? Ahora puedes enviar una notificación de prueba', 'info');
+            } catch (error) {
+                addLog(`? Error al suscribirse: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function sendTestNotification() {
+            const dni = document.getElementById('dni').value;
+            if (!dni) {
+                addLog('? Ingresa un DNI', 'error');
+                return;
+            }
+
+            try {
+                addLog(`?? Enviando notificación de prueba a DNI: ${dni}...`, 'info');
+                
+                const response = await fetch(`${API_URL}/api/fingerprint/test-signalr`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dni: dni })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('? Notificación de prueba enviada correctamente', 'success');
+                    addLog('?? Deberías recibir un evento "test" en 1-2 segundos', 'info');
+                } else {
+                    addLog(`? Error: ${result.message}`, 'error');
+                }
+                
+                console.log('Respuesta del servidor:', result);
+            } catch (error) {
+                addLog(`? Error al enviar test: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function startRegistration() {
+            const dni = document.getElementById('dni').value;
+            if (!dni) {
+                addLog('? Ingresa un DNI', 'error');
+                return;
+            }
+
+            if (!connection) {
+                addLog('? Primero conecta SignalR y suscríbete', 'error');
+                return;
+            }
+
+            try {
+                addLog(`?? Iniciando registro REAL con 3 muestras para DNI: ${dni}...`, 'info');
+                addLog('?? IMPORTANTE: Necesitas el dispositivo Futronic conectado', 'warning');
+                addLog('?? Sigue las instrucciones en pantalla', 'info');
+                
+                const response = await fetch(`${API_URL}/api/fingerprint/register-multi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dni: dni,
+                        dedo: 'indice-derecho',
+                        sampleCount: 3,
+                        includeImages: false
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('? Registro completado exitosamente', 'success');
+                    addLog(`?? Muestras: ${result.data.samplesCollected}`, 'info');
+                    addLog(`? Calidad promedio: ${result.data.averageQuality?.toFixed(2) || 'N/A'}`, 'info');
+                } else {
+                    addLog(`? Error en registro: ${result.message}`, 'error');
+                }
+                
+                console.log('Resultado del registro:', result);
+            } catch (error) {
+                addLog(`? Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        // Auto-mensaje al cargar la página
+        window.addEventListener('load', () => {
+            addLog('? Página de prueba cargada', 'success');
+            addLog('???????????????????????????????????????', 'info');
+            addLog('?? Sigue los pasos en orden:', 'info');
+            addLog('   1. Conectar SignalR', 'info');
+            addLog('   2. Suscribirse al DNI', 'info');
+            addLog('   3. Enviar Test (verifica que funciona)', 'info');
+            addLog('   4. Iniciar Registro (requiere dispositivo)', 'info');
+            addLog('???????????????????????????????????????', 'info');
+        });
+    </script>
+</body>
+</html>
