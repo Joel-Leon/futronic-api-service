@@ -1,0 +1,20 @@
+{
+  "Threshold": 70,
+  "Timeout": 30000,
+  "CaptureMode": "screen",
+  "ShowImage": true,
+  "SaveImage": false,
+  "DetectFakeFinger": false,
+  "MaxFramesInTemplate": 5,
+  "DisableMIDT": false,
+  "MaxRotation": 199,
+  "TemplatePath": "C:/temp/fingerprints",
+  "CapturePath": "C:/temp/fingerprints/captures",
+  "OverwriteExisting": false,
+  "MaxTemplatesPerIdentify": 500,
+  "DeviceCheckRetries": 3,
+  "DeviceCheckDelayMs": 1000,
+  "MinQuality": 50,
+  "CompressImages": false,
+  "ImageFormat": "bmp"
+}

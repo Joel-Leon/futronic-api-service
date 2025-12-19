@@ -19,7 +19,7 @@ namespace FutronicService.Services
     public class FutronicFingerprintService : IFingerprintService
     {
         private readonly ILogger<FutronicFingerprintService> _logger;
-        private readonly IConfiguration _configuration;
+        private readonly IConfigurationService _configService;
         private readonly IProgressNotificationService _progressNotification;
         private DateTime _serviceStartTime;
         private string _lastError;
@@ -27,24 +27,16 @@ namespace FutronicService.Services
         private bool _sdkInitialized;
         private readonly object _deviceLock = new object();
 
-        // Configuraciones
-        private int _threshold;
-        private int _timeout;
-        private string _tempPath;
-        private string _capturePath;
-        private bool _overwriteExisting;
-        private int _maxTemplatesPerIdentify;
-        private int _deviceCheckRetries = 3;
-        private int _deviceCheckDelayMs = 1000;
-        private int _maxRotation = 199; // Valor más restrictivo (166 por defecto en SDK, 199 más estricto)
+        // Configuración current
+        private FingerprintConfiguration _config;
 
         public FutronicFingerprintService(
             ILogger<FutronicFingerprintService> logger, 
-            IConfiguration configuration,
+            IConfigurationService configService,
             IProgressNotificationService progressNotification)
         {
             _logger = logger;
-            _configuration = configuration;
+            _configService = configService;
             _progressNotification = progressNotification;
             _serviceStartTime = DateTime.Now;
             LoadConfiguration();
@@ -53,17 +45,8 @@ namespace FutronicService.Services
 
         private void LoadConfiguration()
         {
-            _threshold = _configuration.GetValue<int>("Fingerprint:Threshold", 70);
-            _timeout = _configuration.GetValue<int>("Fingerprint:Timeout", 30000);
-     _tempPath = _configuration.GetValue<string>("Fingerprint:TempPath", "C:/temp/fingerprints");
-  _capturePath = _configuration.GetValue<string>("Fingerprint:CapturePath", "C:/temp/fingerprints/captures");
-      _overwriteExisting = _configuration.GetValue<bool>("Fingerprint:OverwriteExisting", false);
-   _maxTemplatesPerIdentify = _configuration.GetValue<int>("Fingerprint:MaxTemplatesPerIdentify", 500);
-        _deviceCheckRetries = _configuration.GetValue<int>("Fingerprint:DeviceCheckRetries", 3);
-     _deviceCheckDelayMs = _configuration.GetValue<int>("Fingerprint:DeviceCheckDelayMs", 1000);
-    _maxRotation = _configuration.GetValue<int>("Fingerprint:MaxRotation", 199); // 199 es más restrictivo, 166 es el default del SDK
-
-     _logger.LogInformation($"Configuration loaded: Threshold={_threshold}, Timeout={_timeout}, MaxRotation={_maxRotation}, CapturePath={_capturePath}");
+            _config = _configService.GetConfiguration();
+            _logger.LogInformation($"?? Configuración cargada: Threshold={_config.Threshold}, Timeout={_config.Timeout}, MaxRotation={_config.MaxRotation}, DetectFakeFinger={_config.DetectFakeFinger}");
         }
 
      [HandleProcessCorruptedStateExceptions]
@@ -207,11 +190,11 @@ else
         [SecurityCritical]
     private bool InitializeSDKWithRetries()
  {
-        for (int attempt = 1; attempt <= _deviceCheckRetries; attempt++)
+        for (int attempt = 1; attempt <= _config.DeviceCheckRetries; attempt++)
 {
-           try
-           {
-     _logger.LogInformation($"SDK initialization attempt {attempt}/{_deviceCheckRetries}");
+            try
+            {
+     _logger.LogInformation($"SDK initialization attempt {attempt}/{_config.DeviceCheckRetries}");
 
       using (var testInstance = new FutronicEnrollment())
       {
@@ -228,24 +211,24 @@ else
        {
          _logger.LogError(avEx, $"  ? AccessViolationException on attempt {attempt}");
 
-  if (attempt < _deviceCheckRetries)
+  if (attempt < _config.DeviceCheckRetries)
             {
-        _logger.LogInformation($"  ? Waiting {_deviceCheckDelayMs}ms before retry...");
-          Thread.Sleep(_deviceCheckDelayMs);
+        _logger.LogInformation($"  ? Waiting {_config.DeviceCheckDelayMs}ms before retry...");
+          Thread.Sleep(_config.DeviceCheckDelayMs);
       }
         }
        catch (Exception ex)
       {
  _logger.LogError(ex, $"  ? SDK initialization failed on attempt {attempt}");
 
-               if (attempt < _deviceCheckRetries)
+               if (attempt < _config.DeviceCheckRetries)
 {
-               Thread.Sleep(_deviceCheckDelayMs);
+               Thread.Sleep(_config.DeviceCheckDelayMs);
      }
         }
        }
 
-            _logger.LogError($"SDK initialization failed after {_deviceCheckRetries} attempts");
+            _logger.LogError($"SDK initialization failed after {_config.DeviceCheckRetries} attempts");
             return false;
         }
 
@@ -286,7 +269,7 @@ else
  // Crear estructura de carpetas para la captura
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
     string captureId = $"capture_{timestamp}";
-      string captureDir = Path.Combine(_capturePath, captureId);
+      string captureDir = Path.Combine(_config.CapturePath, captureId);
           string imagesDir = Path.Combine(captureDir, "images");
      Directory.CreateDirectory(captureDir);
        Directory.CreateDirectory(imagesDir);
@@ -406,11 +389,11 @@ return await Task.Run(() =>
  {
       var config = new ConfigResponseData
    {
-         Threshold = _threshold,
-          Timeout = _timeout,
-          TempPath = _tempPath,
-         OverwriteExisting = _overwriteExisting,
-    MaxRotation = _maxRotation
+         Threshold = _config.Threshold,
+          Timeout = _config.Timeout,
+          TempPath = _config.TemplatePath,
+         OverwriteExisting = _config.OverwriteExisting,
+    MaxRotation = _config.MaxRotation
     };
 
          return ApiResponse<ConfigResponseData>.SuccessResponse("Configuración obtenida", config);
@@ -429,34 +412,48 @@ return await Task.Run(() =>
         {
          try
             {
+                // Actualizar configuración mediante ConfigurationService
+                var updates = new Dictionary<string, object>();
+                
                 if (request.Threshold.HasValue)
-     _threshold = request.Threshold.Value;
+                    updates["Threshold"] = request.Threshold.Value;
 
- if (request.Timeout.HasValue)
-  _timeout = request.Timeout.Value;
+                if (request.Timeout.HasValue)
+                    updates["Timeout"] = request.Timeout.Value;
 
-       if (!string.IsNullOrEmpty(request.TempPath))
-        _tempPath = request.TempPath;
+                if (!string.IsNullOrEmpty(request.TempPath))
+                    updates["TemplatePath"] = request.TempPath;
 
-   if (request.OverwriteExisting.HasValue)
-         _overwriteExisting = request.OverwriteExisting.Value;
+                if (request.OverwriteExisting.HasValue)
+                    updates["OverwriteExisting"] = request.OverwriteExisting.Value;
 
-    if (request.MaxRotation.HasValue)
-        _maxRotation = request.MaxRotation.Value;
+                if (request.MaxRotation.HasValue)
+                    updates["MaxRotation"] = request.MaxRotation.Value;
 
-    _logger.LogInformation("Configuration updated successfully");
+                var success = _configService.UpdatePartialConfigurationAsync(updates).Result;
 
-      return GetConfig();
+                if (success)
+                {
+                    // Recargar configuración local
+                    LoadConfiguration();
+                    _logger.LogInformation("Configuration updated successfully");
+                    return GetConfig();
+                }
+
+                return ApiResponse<ConfigResponseData>.ErrorResponse(
+                    "Error al actualizar configuración",
+                    "UPDATE_CONFIG_ERROR"
+                );
             }
-catch (Exception ex)
+            catch (Exception ex)
             {
-    _logger.LogError(ex, "Error in UpdateConfig");
-  return ApiResponse<ConfigResponseData>.ErrorResponse(
-   ex.Message,
-    "UPDATE_CONFIG_ERROR"
-     );
-}
-    }
+                _logger.LogError(ex, "Error in UpdateConfig");
+                return ApiResponse<ConfigResponseData>.ErrorResponse(
+                    ex.Message,
+                    "UPDATE_CONFIG_ERROR"
+                );
+            }
+        }
 
       public async Task<ApiResponse<VerifySimpleResponseData>> VerifySimpleAsync(VerifySimpleRequest request)
         {
@@ -484,7 +481,7 @@ Console.WriteLine($"\n{"=",-60}");
         if (string.IsNullOrEmpty(templatePath))
             {
             string dedo = request.Dedo ?? "index";
-       templatePath = Path.Combine(_tempPath, request.Dni, dedo, $"{request.Dni}.tml");
+       templatePath = Path.Combine(_config.TemplatePath, request.Dni, dedo, $"{request.Dni}.tml");
          }
 
     if (!File.Exists(templatePath))
@@ -511,7 +508,7 @@ Console.WriteLine($"\n{"=",-60}");
            }
 
          // Capturar huella
-             var captureResult = CaptureFingerprintInternal(request.Timeout ?? _timeout);
+             var captureResult = CaptureFingerprintInternal(request.Timeout ?? _config.Timeout);
             if (captureResult == null || captureResult.Template == null)
        {
                 return ApiResponse<VerifySimpleResponseData>.ErrorResponse(
@@ -526,7 +523,7 @@ Console.WriteLine($"\n{"=",-60}");
      Console.WriteLine($"\n?? RESULTADO DE VERIFICACIÓN:");
       Console.WriteLine($"   • Coincide: {(verifyResult.Verified ? "SÍ ?" : "NO ?")}");
        Console.WriteLine($"   • Score FAR: {verifyResult.Score}");
-          Console.WriteLine($"   • Umbral: {_threshold}");
+          Console.WriteLine($"   • Umbral: {_config.Threshold}");
             Console.WriteLine($"   • Calidad captura: {captureResult.Quality}\n");
 
         var responseData = new VerifySimpleResponseData
@@ -535,7 +532,7 @@ Console.WriteLine($"\n{"=",-60}");
            Dedo = request.Dedo ?? "index",
    Verified = verifyResult.Verified,
         Score = verifyResult.Score,
-     Threshold = _threshold,
+     Threshold = _config.Threshold,
             CaptureQuality = captureResult.Quality,
         TemplatePath = templatePath
  };
@@ -573,12 +570,12 @@ Console.WriteLine($"\n{"=",-60}");
                     }
 
                     // ? VERIFICAR PRIMERO SI YA EXISTE LA HUELLA (antes de capturar)
-                    string outputPath = request.OutputPath ?? _tempPath;
+                    string outputPath = request.OutputPath ?? _config.TemplatePath;
                     string dedo = request.Dedo ?? "index";
                     string registrationDir = Path.Combine(outputPath, request.Dni, dedo);
                     string templatePath = Path.Combine(registrationDir, $"{request.Dni}.tml");
 
-                    if (File.Exists(templatePath) && !_overwriteExisting)
+                    if (File.Exists(templatePath) && !_config.OverwriteExisting)
                     {
                         _logger.LogWarning($"Template already exists for DNI: {request.Dni}, finger: {dedo}");
                         _logger.LogInformation($"Template path: {templatePath}");
@@ -607,7 +604,7 @@ Console.WriteLine($"\n{"=",-60}");
                     await _progressNotification.NotifyStartAsync(request.Dni, "registro de huella");
 
                     // Usar FutronicEnrollment para crear un template de múltiples muestras con SignalR
-                    var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _timeout, request.Dni);
+                    var enrollResult = EnrollFingerprintInternal(sampleCount, request.Timeout ?? _config.Timeout, request.Dni);
                     if (enrollResult == null || enrollResult.Template == null)
                     {
                         return ApiResponse<RegisterMultiSampleResponseData>.ErrorResponse(
@@ -654,8 +651,8 @@ Console.WriteLine($"\n{"=",-60}");
         settings = new
                   {
 samples = sampleCount,
-      threshold = _threshold,
-         timeout = request.Timeout ?? _timeout
+      threshold = _config.Threshold,
+         timeout = request.Timeout ?? _config.Timeout
     },
            results = new
           {
@@ -736,7 +733,7 @@ samples = sampleCount,
           );
           }
 
-  string templatesDir = request.TemplatesDirectory ?? _tempPath;
+  string templatesDir = request.TemplatesDirectory ?? _config.TemplatePath;
         _logger.LogInformation($"Starting live identification from directory: {templatesDir}");
          Console.WriteLine($"\n{"=",-60}");
           Console.WriteLine($"=== IDENTIFICACIÓN AUTOMÁTICA (1:N) ===");
@@ -752,7 +749,7 @@ Console.WriteLine($"{"=",-60}");
     }
 
        // Capturar huella
-      var captureResult = CaptureFingerprintInternal(request.Timeout ?? _timeout);
+      var captureResult = CaptureFingerprintInternal(request.Timeout ?? _config.Timeout);
    if (captureResult == null || captureResult.Template == null)
      {
         return ApiResponse<IdentifyLiveResponseData>.ErrorResponse(
@@ -771,12 +768,12 @@ Console.WriteLine($"{"=",-60}");
    int templatesProcessed = 0;
           int matchIndex = -1;
 
-       for (int i = 0; i < Math.Min(templateFiles.Length, _maxTemplatesPerIdentify); i++)
+       for (int i = 0; i < Math.Min(templateFiles.Length, _config.MaxTemplatesPerIdentify); i++)
              {
              var templateFile = templateFiles[i];
        templatesProcessed++;
 
-     Console.Write($"\r Procesando: {templatesProcessed}/{Math.Min(templateFiles.Length, _maxTemplatesPerIdentify)} templates...");
+     Console.Write($"\r Procesando: {templatesProcessed}/{Math.Min(templateFiles.Length, _config.MaxTemplatesPerIdentify)} templates...");
 
       try
         {
@@ -826,14 +823,14 @@ Console.WriteLine($"{"=",-60}");
           Console.WriteLine($"   • DNI: {bestMatch.Dni}");
                   Console.WriteLine($"   • Dedo: {bestMatch.Dedo}");
    Console.WriteLine($"   • Score FAR: {bestMatch.Score}");
-       Console.WriteLine($"   • Umbral: {_threshold}");
+       Console.WriteLine($"   • Umbral: {_config.Threshold}");
        Console.WriteLine($"   • Posición: {matchIndex + 1} de {templatesProcessed}\n");
           }
         else
       {
               Console.WriteLine($"\n? No se encontró coincidencia");
   Console.WriteLine($"   • Templates comparados: {templatesProcessed}");
- Console.WriteLine($"   • Ninguno alcanzó el umbral: {_threshold}\n");
+ Console.WriteLine($"   • Ninguno alcanzó el umbral: {_config.Threshold}\n");
        }
 
           var responseData = new IdentifyLiveResponseData
@@ -843,7 +840,7 @@ Console.WriteLine($"{"=",-60}");
        Dedo = bestMatch?.Dedo,
             TemplatePath = bestMatch?.TemplatePath,
            Score = bestMatch?.Score ?? 0,
-Threshold = _threshold,
+Threshold = _config.Threshold,
               MatchIndex = matchIndex,
       TotalCompared = templatesProcessed
        };
@@ -884,18 +881,23 @@ Threshold = _threshold,
       var done = new ManualResetEvent(false);
 
              using (var identification = new FutronicIdentification())
- {
-         identification.FakeDetection = false;
+            {
+                // ?? Configuraciones desde el servicio de configuración
+                identification.FakeDetection = _config.DetectFakeFinger;
 
-         // Configuraciones optimizadas del SDK
-         ReflectionHelper.TrySetProperty(identification, "FFDControl", true);
-             ReflectionHelper.TrySetProperty(identification, "FARN", _threshold);
-   ReflectionHelper.TrySetProperty(identification, "FastMode", false);
-       ReflectionHelper.TrySetProperty(identification, "Version", 0x02030000);
-           ReflectionHelper.TrySetProperty(identification, "MIOTOff", 3000);
-      ReflectionHelper.TrySetProperty(identification, "DetectCore", true);
+                // Configuraciones optimizadas del SDK
+                ReflectionHelper.TrySetProperty(identification, "FFDControl", true);
+                ReflectionHelper.TrySetProperty(identification, "FARN", _config.Threshold);
+                ReflectionHelper.TrySetProperty(identification, "FastMode", false);
+                ReflectionHelper.TrySetProperty(identification, "Version", 0x02030000);
+                ReflectionHelper.TrySetProperty(identification, "MIOTOff", _config.DisableMIDT ? 0 : 3000); // 0 = MIDT deshabilitado
+                ReflectionHelper.TrySetProperty(identification, "DetectCore", true);
+                ReflectionHelper.TrySetProperty(identification, "MaxRotation", _config.MaxRotation);
+                ReflectionHelper.TrySetProperty(identification, "DetectFakeFinger", _config.DetectFakeFinger);
 
-             // Eventos de progreso
+                _logger.LogInformation($"?? Configuración aplicada: FakeFinger={_config.DetectFakeFinger}, MIDT={!_config.DisableMIDT}, MaxRotation={_config.MaxRotation}");
+
+                // Eventos de progreso
                    identification.OnPutOn += (FTR_PROGRESS p) =>
               {
          _logger.LogInformation("? Apoye el dedo firmemente");
@@ -987,18 +989,25 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
 
                     using (var enrollment = new FutronicEnrollment())
                     {
-                        enrollment.FakeDetection = false;
+                        // ?? Configuraciones desde el servicio de configuración
+                        enrollment.FakeDetection = _config.DetectFakeFinger;
                         enrollment.MaxModels = maxModels;
 
                         // Configuraciones optimizadas del SDK
                         ReflectionHelper.TrySetProperty(enrollment, "FastMode", false);
                         ReflectionHelper.TrySetProperty(enrollment, "FFDControl", true);
-                        ReflectionHelper.TrySetProperty(enrollment, "FARN", _threshold);
+                        ReflectionHelper.TrySetProperty(enrollment, "FARN", _config.Threshold);
                         ReflectionHelper.TrySetProperty(enrollment, "Version", 0x02030000);
-                        ReflectionHelper.TrySetProperty(enrollment, "DetectFakeFinger", false);
-                        ReflectionHelper.TrySetProperty(enrollment, "MIOTOff", 2000);
+                        ReflectionHelper.TrySetProperty(enrollment, "DetectFakeFinger", _config.DetectFakeFinger);
+                        ReflectionHelper.TrySetProperty(enrollment, "MIOTOff", _config.DisableMIDT ? 0 : 2000); // 0 = MIDT deshabilitado
                         ReflectionHelper.TrySetProperty(enrollment, "DetectCore", true);
-                        ReflectionHelper.TrySetProperty(enrollment, "ImageQuality", 50);
+                        ReflectionHelper.TrySetProperty(enrollment, "ImageQuality", _config.MinQuality);
+                        ReflectionHelper.TrySetProperty(enrollment, "MaxRotation", _config.MaxRotation);
+                        
+                        // ?? NOTA: NO sobrescribir MaxModels aquí, ya que se configuró correctamente con el parámetro maxModels del request
+                // La configuración MaxFramesInTemplate se usa para otras validaciones, pero NO debe sobrescribir el valor del request
+
+                _logger.LogInformation($"?? Configuración aplicada: FakeFinger={_config.DetectFakeFinger}, MIDT={!_config.DisableMIDT}, MinQuality={_config.MinQuality}, MaxRotation={_config.MaxRotation}, Muestras={maxModels}");
 
                         // Configurar captura de imágenes pasando función para obtener currentSample actualizado
                         ConfigureImageCapture(enrollment, capturedImages, () => currentSample, maxModels, dni);
@@ -1227,14 +1236,14 @@ identification.OnFakeSource += (FTR_PROGRESS p) =>
               verification.FakeDetection = false;
 
     // Configuraciones optimizadas del SDK
-           ReflectionHelper.TrySetProperty(verification, "FARN", _threshold);
+           ReflectionHelper.TrySetProperty(verification, "FARN", _config.Threshold);
       ReflectionHelper.TrySetProperty(verification, "FastMode", false);
            ReflectionHelper.TrySetProperty(verification, "FFDControl", true);
      ReflectionHelper.TrySetProperty(verification, "MIOTOff", 3000);
    ReflectionHelper.TrySetProperty(verification, "DetectCore", true);
        ReflectionHelper.TrySetProperty(verification, "Version", 0x02030000);
      ReflectionHelper.TrySetProperty(verification, "ImageQuality", 30);
-        ReflectionHelper.TrySetProperty(verification, "MaxRotation", _maxRotation); // Control de rotación máxima (más restrictivo)
+        ReflectionHelper.TrySetProperty(verification, "MaxRotation", _config.MaxRotation); // Control de rotación máxima (más restrictivo)
 
      verification.OnVerificationComplete += (bool success, int resultCode, bool verificationSuccess) =>
        {
@@ -1275,13 +1284,13 @@ result.Score = verificationSuccess ? 0 : 9999;
 
     verification.Verification();
 
-         if (!done.WaitOne(_timeout))
-      {
-           _logger.LogWarning("Verification timeout");
-          return new VerifyResultInternal { Success = false, Verified = false, Score = 9999 };
+    if (!done.WaitOne(_config.Timeout))
+    {
+        _logger.LogWarning("Verification timeout");
+        return new VerifyResultInternal { Success = false, Verified = false, Score = 9999 };
     }
 
-     return result;
+    return result;
          }
     }
            catch (Exception ex)

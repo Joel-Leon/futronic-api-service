@@ -1,290 +1,321 @@
-# ?? Futronic SDK - Sistema de Huellas Dactilares
+# ?? Futronic API Service - Sistema de Huellas Dactilares
 
-Solución completa para captura, registro, verificación e identificación de huellas dactilares usando el SDK de Futronic.
+![.NET 8](https://img.shields.io/badge/.NET-8.0-blue)
+![SignalR](https://img.shields.io/badge/SignalR-Real--time-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## ?? Proyectos Incluidos
-
-### 1. **futronic-cli** - Aplicación de Consola (CLI)
-Aplicación original de línea de comandos para operaciones básicas con el lector de huellas.
-
-- ? Captura de huellas dactilares
-- ? Verificación 1:1 de huellas
-- ? Almacenamiento de templates
-- ? Procesamiento de imágenes
-
-**Uso:**
-```bash
-futronic-cli.exe capture <nombre> [opciones]
-futronic-cli.exe verify <nombre> [opciones]
-```
-
-**Documentación:** Ver código fuente y comentarios en el proyecto
+Sistema completo de gestión de huellas dactilares usando lectores **Futronic FS88** con notificaciones en tiempo real mediante **SignalR**.
 
 ---
 
-### 2. **FutronicService** - Microservicio REST API ? **NUEVO**
-Servicio web completo que expone toda la funcionalidad del SDK a través de endpoints REST.
+## ?? Características Principales
 
-- ? API REST completa con 7 endpoints
-- ? Captura, registro, verificación e identificación
-- ? Health checks y configuración dinámica
-- ? CORS configurado para aplicaciones web
-- ? Manejo de errores robusto
-- ? Documentación exhaustiva
-
-**Quick Start:**
-```powershell
-cd FutronicService
-.\start.ps1
-```
-
-**Endpoints principales:**
-- `GET /health` - Estado del servicio
-- `POST /api/fingerprint/capture` - Capturar huella
-- `POST /api/fingerprint/register` - Registrar huella
-- `POST /api/fingerprint/verify` - Verificar huella (1:1)
-- `POST /api/fingerprint/identify` - Identificar huella (1:N)
-
-**Documentación completa:** `FutronicService/README.md`
+? **Registro Multi-Muestra** - Captura múltiples muestras para mejor precisión  
+? **Verificación 1:1** - Verificar identidad contra una huella registrada  
+? **Identificación 1:N** - Identificar automáticamente entre múltiples huellas  
+? **Notificaciones en Tiempo Real** - SignalR para feedback durante captura  
+? **Detección de Dedos Falsos** - Liveness detection configurable  
+? **Configuración Persistente** - Personalizar comportamiento del lector  
+? **Imágenes en Base64** - Recibir imágenes de huellas capturadas  
+? **Prevención de Duplicados** - Verificación temprana antes de capturar  
+? **API RESTful** - Endpoints HTTP simples  
+? **CORS Habilitado** - Integración con frontends
 
 ---
-
-## ?? ¿Cuál Usar?
-
-| Característica | CLI | API Service |
-|----------------|-----|-------------|
-| **Tipo** | Aplicación de consola | Servicio web |
-| **Uso** | Pruebas, scripts, operaciones simples | Integración con aplicaciones web/móvil |
-| **Interface** | Línea de comandos | HTTP REST (JSON) |
-| **Integración** | Scripts batch/PowerShell | Cualquier lenguaje/plataforma |
-| **Recomendado para** | Testing, desarrollo, automatización local | Producción, aplicaciones empresariales |
 
 ## ?? Inicio Rápido
 
-### CLI (Pruebas Rápidas)
+### Requisitos
 
+- **.NET 8 SDK** ([Descargar](https://dotnet.microsoft.com/download/dotnet/8.0))
+- **Lector Futronic FS88** (o compatible)
+- **Windows** (el SDK de Futronic requiere Windows)
+- **Futronic SDK** instalado
+
+### Instalación
+
+1. **Clonar el repositorio**:
 ```bash
-# Capturar huella
-cd futronic-cli
-futronic-cli.exe capture test_user
-
-# Verificar huella
-futronic-cli.exe verify test_user
+git clone https://github.com/Joel-Leon/futronic-api-service.git
+cd futronic-api-service
 ```
 
-### API Service (Aplicaciones en Producción)
-
-```powershell
-# Opción 1: Script automatizado
+2. **Restaurar paquetes**:
+```bash
 cd FutronicService
-.\start.ps1
+dotnet restore
+```
 
-# Opción 2: Manual
-cd FutronicService
-dotnet build --configuration Release
+3. **Compilar**:
+```bash
+dotnet build
+```
+
+4. **Ejecutar**:
+```bash
 dotnet run
-
-# Verificar que funciona
-Invoke-RestMethod -Uri "http://localhost:5000/health"
 ```
 
-## ?? Requisitos del Sistema
-
-### Comunes (Ambos Proyectos)
-- ? Windows 10/11 o Windows Server 2016+
-- ? .NET Framework 4.8
-- ? Dispositivo Futronic (FS88 o compatible)
-- ? Drivers de Futronic instalados
-- ? SDK de Futronic (DLLs incluidas)
-
-### Adicionales (Solo API Service)
-- ? Puerto 5000 disponible (o configurar otro)
-- ? Permisos para crear reglas de firewall (opcional)
-
-## ?? Documentación
-
-### FutronicService (API)
-- ?? **README.md** - Documentación completa de la API
-- ?? **MIGRATION.md** - Guía de migración CLI ? API
-- ?? **EXAMPLES_CLIENT.md** - Ejemplos JavaScript/React
-- ? **DEPLOYMENT_CHECKLIST.md** - Checklist para producción
-- ?? **RESUMEN_EJECUTIVO.md** - Estado del proyecto
-
-### Scripts Útiles
-- ?? **start.ps1** - Inicio rápido del servicio
-- ?? **test-api.ps1** - Pruebas automatizadas
-
-## ??? Arquitectura
-
-```
-???????????????????????????????????????????????????
-?     Aplicaciones Cliente   ?
-?  (Web, Móvil, Desktop, Scripts)                 ?
-???????????????????????????????????????????????????
-  ? HTTP/REST
-           ?
-???????????????????????????????????????????????????
-?         FutronicService (API)  ?
-?  - Controllers (Endpoints REST)        ?
-?  - Services (Lógica de negocio)       ?
-?  - Middleware (Errores, CORS)    ?
-???????????????????????????????????????????????????
-           ? Referencia de proyecto
-      ?
-???????????????????????????????????????????????????
-?         futronic-cli (Librería)  ?
-?  - FingerprintCaptureService         ?
-?  - FingerprintVerificationService          ?
-?- TemplateUtils, ImageUtils, etc.  ?
-???????????????????????????????????????????????????
-         ? P/Invoke
-        ?
-???????????????????????????????????????????????????
-?         SDK de Futronic (DLLs nativas)     ?
-?  - Captura de huellas     ?
-?  - Generación de templates        ?
-?  - Comparación biométrica        ?
-???????????????????????????????????????????????????
-               ? USB
-      ?
-???????????????????????????????????????????????????
-?      Dispositivo Futronic FS88          ?
-?      (Lector de Huellas Dactilares)    ?
-???????????????????????????????????????????????????
-```
-
-## ?? Ejemplos de Uso
-
-### Integración con JavaScript
-
-```javascript
-// Capturar huella
-const response = await fetch('http://localhost:5000/api/fingerprint/capture', {
-  method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ timeout: 30000 })
-});
-const result = await response.json();
-console.log('Huella capturada:', result.data);
-```
-
-### Integración con Python
-
-```python
-import requests
-
-# Verificar huella
-response = requests.post('http://localhost:5000/api/fingerprint/verify', json={
-    'storedTemplate': 'C:/path/stored.tml',
-    'capturedTemplate': 'C:/path/captured.tml'
-})
-result = response.json()
-print('Coincide:', result['data']['matched'])
-```
-
-### Integración con C#
-
-```csharp
-using System.Net.Http;
-using System.Text.Json;
-
-// Identificar persona
-var client = new HttpClient();
-var request = new {
-    capturedTemplate = "C:/path/captured.tml",
-    templates = new[] {
-        new { dni = "12345678", dedo = "indice-derecho", templatePath = "C:/path/12345678.tml" }
-    }
-};
-
-var response = await client.PostAsJsonAsync(
-    "http://localhost:5000/api/fingerprint/identify", 
-    request
-);
-var result = await response.Content.ReadFromJsonAsync<ApiResponse>();
-```
-
-## ?? Seguridad
-
-- ? CORS configurado (solo orígenes autorizados)
-- ? Validación de paths (prevención de path traversal)
-- ? Manejo seguro de errores (sin exposición de información sensible)
-- ? Sanitización de entradas
-- ?? **Recomendado para producción**: Agregar autenticación (API Keys, JWT, OAuth)
-
-## ?? Troubleshooting
-
-### Dispositivo no detectado
-1. Verificar conexión USB
-2. Instalar drivers de Futronic
-3. Verificar en Administrador de Dispositivos
-4. Reiniciar el servicio
-
-### Puerto en uso
-```powershell
-# Ver qué está usando el puerto 5000
-netstat -ano | findstr :5000
-
-# Cambiar puerto en appsettings.json
-# "Url": "http://localhost:OTRO_PUERTO"
-```
-
-### Error de compilación
-1. Verificar .NET Framework 4.8 instalado
-2. Restaurar paquetes NuGet
-3. Limpiar y recompilar solución
-
-## ?? Soporte
-
-### Recursos
-- ?? Documentación completa en `FutronicService/README.md`
-- ?? Pruebas automatizadas: `FutronicService/test-api.ps1`
-- ?? Ejemplos de cliente: `FutronicService/EXAMPLES_CLIENT.md`
-
-### Logs
-- API Service: Logs en consola (Serilog)
-- CLI: Salida estándar con códigos de color
-
-## ?? Roadmap
-
-### Completado ?
-- [x] CLI funcional
-- [x] API REST completa
-- [x] Documentación exhaustiva
-- [x] Scripts de prueba
-- [x] Ejemplos de integración
-
-### Futuro ??
-- [ ] Autenticación (API Keys, JWT)
-- [ ] Rate limiting
-- [ ] Swagger/OpenAPI
-- [ ] Migración a .NET 6/8
-- [ ] Contenedorización (Docker)
-- [ ] Base de datos para templates
-- [ ] WebSockets para notificaciones en tiempo real
-
-## ?? Licencia
-
-Este proyecto utiliza el SDK de Futronic. Consultar licencia del SDK para uso comercial.
-
-## ?? Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-1. Fork el repositorio
-2. Crear rama feature (`git checkout -b feature/AmazingFeature`)
-3. Commit cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abrir Pull Request
-
-## ?? Estado del Proyecto
-
-| Componente | Estado | Versión |
-|------------|--------|---------|
-| **futronic-cli** | ? Estable | 1.0 |
-| **FutronicService** | ? Production Ready | 1.0 |
-| **Documentación** | ? Completa | 1.0 |
-| **Tests** | ? Funcional | 1.0 |
+El servicio estará disponible en:
+- **HTTP**: `http://localhost:5000`
+- **SignalR Hub**: `http://localhost:5000/hubs/fingerprint`
 
 ---
 
-**Desarrollado con ?? para integración biométrica segura y confiable**
+## ?? Documentación
+
+### Guías Completas
+
+- ?? **[Guía SignalR](GUIA_SIGNALR_COMPLETA.md)** - Integración de notificaciones en tiempo real
+- ?? **[Guía de Configuración](GUIA_CONFIGURACION_API.md)** - Personalizar el comportamiento del lector
+- ?? **[Guía de Integración Frontend](GUIA_INTEGRACION_FRONTEND.md)** - Ejemplos de uso desde JavaScript
+
+### Archivos de Configuración
+
+- `fingerprint-config.json` - Archivo de configuración (se genera automáticamente)
+- `fingerprint-config.example.json` - Ejemplo de configuración
+- `fingerprint-config.schema.json` - Schema JSON para validación
+- `appsettings.json` - Configuración de la aplicación
+
+---
+
+## ?? API Endpoints
+
+### ?? Health Check
+
+```http
+GET /api/health
+```
+
+### ?? Registro de Huellas
+
+```http
+POST /api/fingerprint/register-multi
+Content-Type: application/json
+
+{
+  "dni": "12345678",
+  "dedo": "indice-derecho",
+  "sampleCount": 5,
+  "timeout": 30000
+}
+```
+
+### ? Verificación 1:1
+
+```http
+POST /api/fingerprint/verify-simple
+Content-Type: application/json
+
+{
+  "dni": "12345678",
+  "dedo": "indice-derecho",
+  "timeout": 15000
+}
+```
+
+### ?? Identificación 1:N
+
+```http
+POST /api/fingerprint/identify-live
+Content-Type: application/json
+
+{
+  "templatesDirectory": "C:/temp/fingerprints",
+  "timeout": 15000
+}
+```
+
+### ?? Configuración
+
+```http
+GET /api/configuration              # Obtener configuración
+PUT /api/configuration              # Actualizar completa
+PATCH /api/configuration            # Actualizar parcial
+POST /api/configuration/validate    # Validar sin guardar
+POST /api/configuration/reset       # Restaurar por defecto
+GET /api/configuration/schema       # Obtener schema
+```
+
+---
+
+## ??? Configuración Persistente
+
+El sistema permite personalizar el comportamiento del lector mediante configuración persistente.
+
+### Parámetros Principales
+
+| Parámetro | Tipo | Rango | Descripción |
+|-----------|------|-------|-------------|
+| `threshold` | int | 0-100 | Umbral de coincidencia (más alto = más estricto) |
+| `timeout` | int | 5000-60000 | Timeout en ms para captura |
+| `detectFakeFinger` | bool | - | Detectar dedos falsos |
+| `maxFramesInTemplate` | int | 1-10 | Frames máximos en template |
+| `maxRotation` | int | 0-199 | Rotación máxima permitida |
+| `minQuality` | int | 0-100 | Calidad mínima aceptable |
+| `disableMIDT` | bool | - | Deshabilitar detección de movimiento fino |
+
+### Ejemplo de Configuración
+
+```javascript
+// Alta Seguridad
+{
+  "threshold": 90,
+  "detectFakeFinger": true,
+  "maxRotation": 199,
+  "minQuality": 70
+}
+
+// Balance (Recomendado - Mejor UX)
+{
+  "threshold": 70,
+  "detectFakeFinger": false,
+  "maxRotation": 199,
+  "minQuality": 50
+}
+
+// Velocidad
+{
+  "threshold": 60,
+  "detectFakeFinger": false,
+  "disableMIDT": true,
+  "maxFramesInTemplate": 3
+}
+```
+
+Ver **[GUIA_CONFIGURACION_API.md](GUIA_CONFIGURACION_API.md)** para detalles completos.
+
+---
+
+## ?? SignalR - Notificaciones en Tiempo Real
+
+El sistema envía notificaciones en tiempo real durante el proceso de captura:
+
+### Eventos
+
+- **`operation_started`** - Operación iniciada
+- **`sample_started`** - Inicio de captura de muestra
+- **`sample_captured`** - Muestra capturada (incluye imagen Base64)
+- **`operation_completed`** - Operación completada
+- **`error`** - Error durante el proceso
+
+### Ejemplo de Integración
+
+```javascript
+import * as signalR from '@microsoft/signalr';
+
+// Conectar
+const connection = new signalR.HubConnectionBuilder()
+  .withUrl('http://localhost:5000/hubs/fingerprint')
+  .build();
+
+// Suscribirse a notificaciones
+await connection.start();
+await connection.invoke('SubscribeToDni', '12345678');
+
+// Escuchar eventos
+connection.on('ReceiveProgress', (notification) => {
+  console.log(notification.eventType, notification.data);
+  
+  if (notification.eventType === 'sample_captured') {
+    // Mostrar imagen
+    const img = document.createElement('img');
+    img.src = `data:image/bmp;base64,${notification.data.imageBase64}`;
+    document.body.appendChild(img);
+  }
+});
+```
+
+Ver **[GUIA_SIGNALR_COMPLETA.md](GUIA_SIGNALR_COMPLETA.md)** para ejemplos completos.
+
+---
+
+## ?? Configuración del Servicio
+
+### `appsettings.json`
+
+```json
+{
+  "Fingerprint": {
+    "TempPath": "C:/temp/fingerprints",
+    "Threshold": 70,
+    "Timeout": 30000,
+    "DetectFakeFinger": false,
+    "MaxRotation": 199,
+    "OverwriteExisting": false
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "http://localhost:3001"
+    ]
+  }
+}
+```
+
+---
+
+## ?? Solución de Problemas
+
+### Problema: Muchos rechazos
+
+**Solución**: Reducir restricciones
+```http
+PATCH /api/configuration
+{"threshold": 65, "maxRotation": 180}
+```
+
+### Problema: Falsos positivos
+
+**Solución**: Aumentar seguridad
+```http
+PATCH /api/configuration
+{"threshold": 85, "detectFakeFinger": true, "minQuality": 70}
+```
+
+### Problema: Capturas muy lentas
+
+**Solución**: Desactivar detección de dedos falsos
+```http
+PATCH /api/configuration
+{"detectFakeFinger": false, "disableMIDT": true}
+```
+
+---
+
+## ?? Changelog
+
+### v3.3.1 (2025-01-24)
+- ? **DetectFakeFinger desactivado por defecto** para mejor experiencia de usuario
+- ? Script de verificación de configuración (`check-config.ps1`)
+- ? Documentación actualizada con nuevas recomendaciones
+
+### v3.3 (2025-01-24)
+- ? Sistema de configuración persistente
+- ? Verificación temprana de duplicados
+- ? Más opciones de personalización (DetectFakeFinger, MaxFramesInTemplate, DisableMIDT, MaxRotation, MinQuality)
+- ? Endpoints de configuración completos
+- ? Validación de configuración
+- ? Mejoras en mensajes de error
+
+### v3.2 (2025-01-23)
+- ? Notificaciones SignalR en tiempo real
+- ? Imágenes en Base64
+- ? Prevención de duplicados
+
+---
+
+## ?? Licencia
+
+Este proyecto está bajo la licencia MIT.
+
+---
+
+## ????? Autor
+
+**Joel León**  
+GitHub: [@Joel-Leon](https://github.com/Joel-Leon)
+
+---
+
+**? Si este proyecto te fue útil, considera darle una estrella en GitHub ?**

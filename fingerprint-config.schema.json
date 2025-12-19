@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fingerprint Configuration Schema",
+  "description": "Configuraci�n del servicio de huellas dactilares Futronic",
+  "type": "object",
+  "properties": {
+    "threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 70,
+      "description": "Umbral de coincidencia (0-100). Valores m�s altos = m�s estricto"
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 5000,
+      "maximum": 60000,
+      "default": 30000,
+      "description": "Timeout en milisegundos para operaciones de captura"
+    },
+    "captureMode": {
+      "type": "string",
+      "enum": ["screen", "file"],
+      "default": "screen",
+      "description": "Modo de captura: screen (temporal) o file (guardar imagen)"
+    },
+    "showImage": {
+      "type": "boolean",
+      "default": true,
+      "description": "Mostrar imagen de huella en pantalla durante captura"
+    },
+    "saveImage": {
+      "type": "boolean",
+      "default": false,
+      "description": "Guardar imagen de huella como archivo BMP"
+    },
+    "detectFakeFinger": {
+      "type": "boolean",
+      "default": true,
+      "description": "Detectar dedos falsos/artificiales (liveness detection)"
+    },
+    "maxFramesInTemplate": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 5,
+      "description": "N�mero m�ximo de frames en el template (m�s frames = mejor calidad pero plantillas m�s grandes)"
+    },
+    "disableMIDT": {
+      "type": "boolean",
+      "default": false,
+      "description": "Deshabilitar detecci�n de movimiento incremental del dedo. true = m�s r�pido pero menos preciso"
+    },
+    "maxRotation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 199,
+      "default": 199,
+      "description": "Valor de rotaci�n m�xima permitida para matching (166 = default del SDK, 199 = m�s restrictivo)"
+    },
+    "templatePath": {
+      "type": "string",
+      "default": "C:/temp/fingerprints",
+      "description": "Ruta de almacenamiento de plantillas"
+    },
+    "capturePath": {
+      "type": "string",
+      "default": "C:/temp/fingerprints/captures",
+      "description": "Ruta de almacenamiento de im�genes capturadas"
+    },
+    "overwriteExisting": {
+      "type": "boolean",
+      "default": false,
+      "description": "Permitir sobrescribir huellas existentes"
+    },
+    "maxTemplatesPerIdentify": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000,
+      "default": 500,
+      "description": "M�ximo de plantillas a comparar en identificaci�n"
+    },
+    "deviceCheckRetries": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 3,
+      "description": "Reintentos de verificaci�n de dispositivo al iniciar"
+    },
+    "deviceCheckDelayMs": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 5000,
+      "default": 1000,
+      "description": "Delay en ms entre reintentos de verificaci�n de dispositivo"
+    },
+    "minQuality": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 50,
+      "description": "Calidad m�nima aceptable para una muestra (0-100)"
+    },
+    "compressImages": {
+      "type": "boolean",
+      "default": false,
+      "description": "Habilitar compresi�n de im�genes en Base64"
+    },
+    "imageFormat": {
+      "type": "string",
+      "enum": ["bmp", "png", "jpg"],
+      "default": "bmp",
+      "description": "Formato de imagen: bmp, png o jpg"
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

@@ -85,6 +85,9 @@ namespace FutronicService
             // Registrar servicio de notificaciones de progreso
             services.AddSingleton<IProgressNotificationService, ProgressNotificationService>();
             
+            // Registrar servicio de configuración
+            services.AddSingleton<IConfigurationService, ConfigurationService>();
+            
             // Agregar HttpClient para callbacks HTTP
             services.AddHttpClient();
 
