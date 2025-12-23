@@ -18,5 +18,11 @@ namespace FutronicService.Services
         Task<ApiResponse<VerifySimpleResponseData>> VerifySimpleAsync(VerifySimpleRequest request);
         Task<ApiResponse<RegisterMultiSampleResponseData>> RegisterMultiSampleAsync(RegisterMultiSampleRequest request);
         Task<ApiResponse<IdentifyLiveResponseData>> IdentifyLiveAsync(IdentifyLiveRequest request);
+        
+        /// <summary>
+        /// Recarga la configuración desde el servicio de configuración
+        /// Debe llamarse después de actualizar la configuración vía API
+        /// </summary>
+        void ReloadConfiguration();
     }
 }

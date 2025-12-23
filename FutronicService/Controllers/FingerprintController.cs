@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using FutronicService.Models;
 using FutronicService.Services;
@@ -13,16 +14,223 @@ namespace FutronicService.Controllers
     public class FingerprintController : ControllerBase
  {
         private readonly IFingerprintService _fingerprintService;
+        private readonly IConfigurationService _configService;
   private readonly ILogger<FingerprintController> _logger;
 
-        public FingerprintController(IFingerprintService fingerprintService, ILogger<FingerprintController> logger)
+        public FingerprintController(
+            IFingerprintService fingerprintService,
+            IConfigurationService configService,
+            ILogger<FingerprintController> logger)
 {
      _fingerprintService = fingerprintService;
+     _configService = configService;
    _logger = logger;
     }
 
-   /// <summary>
-   /// POST /api/fingerprint/identify
+        // ============================================
+        // CONFIGURACIÓN (Single Source of Truth)
+        // ============================================
+
+        /// <summary>
+        /// GET /api/fingerprint/config
+        /// Obtiene la configuración actual del servicio
+        /// </summary>
+        [HttpGet("config")]
+        public ActionResult<ApiResponse<FingerprintConfiguration>> GetConfiguration()
+        {
+            try
+            {
+                _logger.LogInformation("?? GET /api/fingerprint/config");
+                var config = _configService.GetConfiguration();
+                return Ok(ApiResponse<FingerprintConfiguration>.SuccessResponse(
+                    "Configuración obtenida exitosamente", config));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener configuración");
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    ex.Message, "GET_CONFIG_ERROR"));
+            }
+        }
+
+        /// <summary>
+        /// PUT /api/fingerprint/config
+        /// Actualiza la configuración completa (FUENTE DE VERDAD)
+        /// </summary>
+        [HttpPut("config")]
+        public async Task<ActionResult<ApiResponse<FingerprintConfiguration>>> UpdateConfiguration(
+            [FromBody] FingerprintConfiguration config)
+        {
+            try
+            {
+                _logger.LogInformation("?? PUT /api/fingerprint/config");
+                var success = await _configService.UpdateConfigurationAsync(config);
+                
+                if (success)
+                {
+                    // ? IMPORTANTE: Recargar configuración en el servicio de huellas
+                    _fingerprintService.ReloadConfiguration();
+                    
+                    var updatedConfig = _configService.GetConfiguration();
+                    
+                    _logger.LogInformation("? Configuración actualizada y recargada en todos los servicios");
+                    
+                    return Ok(ApiResponse<FingerprintConfiguration>.SuccessResponse(
+                        "Configuración actualizada exitosamente", updatedConfig));
+                }
+                
+                return BadRequest(ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    "Error al actualizar configuración", "UPDATE_CONFIG_FAILED"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al actualizar configuración");
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    ex.Message, "UPDATE_CONFIG_ERROR"));
+            }
+        }
+
+        /// <summary>
+        /// PATCH /api/fingerprint/config
+        /// Actualiza campos específicos de la configuración
+        /// </summary>
+        [HttpPatch("config")]
+        public async Task<ActionResult<ApiResponse<FingerprintConfiguration>>> PatchConfiguration(
+            [FromBody] UpdateConfigRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("?? PATCH /api/fingerprint/config");
+                
+                var updates = new Dictionary<string, object>();
+                if (request.Threshold.HasValue) updates["Threshold"] = request.Threshold.Value;
+                if (request.Timeout.HasValue) updates["Timeout"] = request.Timeout.Value;
+                if (request.MaxRotation.HasValue) updates["MaxRotation"] = request.MaxRotation.Value;
+                if (!string.IsNullOrEmpty(request.TempPath)) updates["TemplatePath"] = request.TempPath;
+                if (request.OverwriteExisting.HasValue) updates["OverwriteExisting"] = request.OverwriteExisting.Value;
+
+                var success = await _configService.UpdatePartialConfigurationAsync(updates);
+                
+                if (success)
+                {
+                    // ? IMPORTANTE: Recargar configuración en el servicio de huellas
+                    _fingerprintService.ReloadConfiguration();
+                    
+                    var updatedConfig = _configService.GetConfiguration();
+                    
+                    _logger.LogInformation($"? Configuración actualizada ({updates.Count} campos) y recargada");
+                    
+                    return Ok(ApiResponse<FingerprintConfiguration>.SuccessResponse(
+                        $"Configuración actualizada ({updates.Count} campos)", updatedConfig));
+                }
+                
+                return BadRequest(ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    "Error en actualización parcial", "PATCH_CONFIG_FAILED"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error en actualización parcial");
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    ex.Message, "PATCH_CONFIG_ERROR"));
+            }
+        }
+
+        /// <summary>
+        /// POST /api/fingerprint/config/validate
+        /// Valida una configuración sin guardarla
+        /// </summary>
+        [HttpPost("config/validate")]
+        public ActionResult<ApiResponse<ConfigurationValidationResult>> ValidateConfiguration(
+            [FromBody] FingerprintConfiguration config)
+        {
+            try
+            {
+                _logger.LogInformation("?? POST /api/fingerprint/config/validate");
+                var validationResult = _configService.ValidateConfiguration(config);
+                return Ok(ApiResponse<ConfigurationValidationResult>.SuccessResponse(
+                    validationResult.IsValid ? "Configuración válida" : "Configuración inválida",
+                    validationResult));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al validar configuración");
+                return StatusCode(500, ApiResponse<ConfigurationValidationResult>.ErrorResponse(
+                    ex.Message, "VALIDATION_ERROR"));
+            }
+        }
+
+        /// <summary>
+        /// POST /api/fingerprint/config/reset
+        /// Restaura la configuración a valores por defecto
+        /// </summary>
+        [HttpPost("config/reset")]
+        public async Task<ActionResult<ApiResponse<FingerprintConfiguration>>> ResetConfiguration()
+        {
+            try
+            {
+                _logger.LogWarning("?? POST /api/fingerprint/config/reset");
+                var success = await _configService.ResetToDefaultAsync();
+                
+                if (success)
+                {
+                    // ? IMPORTANTE: Recargar configuración en el servicio de huellas
+                    _fingerprintService.ReloadConfiguration();
+                    
+                    var defaultConfig = _configService.GetConfiguration();
+                    
+                    _logger.LogInformation("? Configuración restaurada y recargada");
+                    
+                    return Ok(ApiResponse<FingerprintConfiguration>.SuccessResponse(
+                        "Configuración restaurada a valores por defecto", defaultConfig));
+                }
+                
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    "Error al restaurar configuración", "RESET_CONFIG_FAILED"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al resetear configuración");
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    ex.Message, "RESET_CONFIG_ERROR"));
+            }
+        }
+
+        /// <summary>
+        /// POST /api/fingerprint/config/reload
+        /// Recarga la configuración desde el archivo
+        /// </summary>
+        [HttpPost("config/reload")]
+        public async Task<ActionResult<ApiResponse<FingerprintConfiguration>>> ReloadConfiguration()
+        {
+            try
+            {
+                _logger.LogInformation("?? POST /api/fingerprint/config/reload");
+                await _configService.ReloadConfigurationAsync();
+                
+                // ? IMPORTANTE: Recargar configuración en el servicio de huellas
+                _fingerprintService.ReloadConfiguration();
+                
+                var config = _configService.GetConfiguration();
+                
+                _logger.LogInformation("? Configuración recargada desde archivo y aplicada");
+                
+                return Ok(ApiResponse<FingerprintConfiguration>.SuccessResponse(
+                    "Configuración recargada desde archivo", config));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al recargar configuración");
+                return StatusCode(500, ApiResponse<FingerprintConfiguration>.ErrorResponse(
+                    ex.Message, "RELOAD_CONFIG_ERROR"));
+            }
+        }
+
+        // ============================================
+        // OPERACIONES DE HUELLA DACTILAR
+        // ============================================
+
+        /// <summary>
+  /// POST /api/fingerprint/identify
   /// Identifica huella entre múltiples templates (1:N)
         /// </summary>
     [HttpPost("identify")]
@@ -69,43 +277,7 @@ if (!result.Success)
    return Ok(result);
 }
 
-   /// <summary>
-  /// GET /api/fingerprint/config
- /// Obtiene configuración actual
- /// </summary>
-  [HttpGet("config")]
-   public IActionResult GetConfig()
-        {
-     _logger.LogInformation("GetConfig endpoint called");
- var result = _fingerprintService.GetConfig();
-     return Ok(result);
-     }
-
-        /// <summary>
-  /// POST /api/fingerprint/config
-  /// Actualiza configuración en runtime
- /// </summary>
- [HttpPost("config")]
-        public IActionResult UpdateConfig([FromBody] UpdateConfigRequest request)
-   {
- _logger.LogInformation("UpdateConfig endpoint called");
-
-        if (request == null)
-      {
- return BadRequest(ApiResponse<object>.ErrorResponse("Request body es requerido", "INVALID_INPUT"));
-       }
-
- var result = _fingerprintService.UpdateConfig(request);
-
-      if (!result.Success)
-      {
-    return BadRequest(result);
-     }
-
-   return Ok(result);
-    }
-
-        /// <summary>
+    /// <summary>
      /// POST /api/fingerprint/verify-simple
      /// Verifica identidad capturando huella automáticamente usando SDK de Futronic
         /// </summary>

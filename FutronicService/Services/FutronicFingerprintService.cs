@@ -43,6 +43,16 @@ namespace FutronicService.Services
             InitializeDevice();
         }
 
+        /// <summary>
+        /// Recarga la configuración desde el servicio de configuración
+        /// Este método debe llamarse después de actualizar la configuración vía API
+        /// </summary>
+        public void ReloadConfiguration()
+        {
+            LoadConfiguration();
+            _logger.LogInformation("? Configuración recargada en FingerprintService");
+        }
+
         private void LoadConfiguration()
         {
             _config = _configService.GetConfiguration();
@@ -591,14 +601,21 @@ Console.WriteLine($"\n{"=",-60}");
                         );
                     }
 
-                    int sampleCount = Math.Min(request.SampleCount ?? 5, 10);
-                    _logger.LogInformation($"Starting multi-sample registration for DNI: {request.Dni} with {sampleCount} samples");
+                    // ? Usar maxFramesInTemplate de la configuración como default si no se especifica en el request
+                    int sampleCount = request.SampleCount ?? _config.MaxFramesInTemplate;
+                    
+                    // Validar que no exceda el límite máximo del SDK (10 muestras)
+                    sampleCount = Math.Min(sampleCount, 10);
+                    
+                    _logger.LogInformation($"Starting multi-sample registration for DNI: {request.Dni} with {sampleCount} samples (from request: {request.SampleCount}, config default: {_config.MaxFramesInTemplate})");
+                    
                     Console.WriteLine($"\n{"=",-60}");
                     Console.WriteLine($"=== REGISTRO DE HUELLA ===");
                     Console.WriteLine($"{"=",-60}");
                     Console.WriteLine($"?? DNI: {request.Dni}");
                     Console.WriteLine($"?? Dedo: {request.Dedo ?? "index"}");
                     Console.WriteLine($"?? Muestras: {sampleCount}");
+                    Console.WriteLine($"?? Configuración: maxFramesInTemplate = {_config.MaxFramesInTemplate}");
 
                     // ? Notificar inicio de operación por SignalR
                     await _progressNotification.NotifyStartAsync(request.Dni, "registro de huella");
